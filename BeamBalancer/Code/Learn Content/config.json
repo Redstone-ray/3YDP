@@ -1,0 +1,30 @@
+{
+  "timestamp": "2025-10-01T11:06:29.177995",
+  "beam_length_m": 0.185,
+  "camera": {
+    "index": 0,
+    "frame_width": 640,
+    "frame_height": 480
+  },
+  "ball_detection": {
+    "lower_hsv": [
+      10.0,
+      157.0,
+      162.0
+    ],
+    "upper_hsv": [
+      24.0,
+      230.0,
+      230.0
+    ]
+  },
+  "calibration": {
+    "pixel_to_meter_ratio": 0.0004894162767859926,
+    "position_min_m": -0.13639709506170705,
+    "position_max_m": -0.13634741616562748
+  },
+  "servo": {
+    "port": "COM3",
+    "neutral_angle": 15
+  }
+}
