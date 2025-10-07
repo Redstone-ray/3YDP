@@ -17,7 +17,7 @@ class BasicPIDController:
         with open(config_file, 'r') as f:
             self.config = json.load(f)
         # PID gains (controlled by sliders in GUI)
-        self.Kp = 10.0
+        self.Kp = 1.0
         self.Ki = 0.0
         self.Kd = 0.0
         # Scale factor for converting from pixels to meters
@@ -64,6 +64,7 @@ class BasicPIDController:
     def update_pid(self, position, dt=0.033):
         """Perform PID calculation and return control output."""
         error = self.setpoint - position  # Compute error
+        print(f"Error: {error} | Position: {position} | Setpoint: {self.setpoint}")
         error = error * 100  # Scale error for easier tuning (if needed)
         # Proportional term
         P = self.Kp * error
@@ -114,10 +115,16 @@ class BasicPIDController:
         if not self.connect_servo():
             print("[ERROR] No servo - running in simulation mode")
         self.start_time = time.time()
+        last_time = time.time()
         while self.running:
             try:
                 # Wait for latest ball position from camera
                 position = self.position_queue.get(timeout=0.1)
+                # Print time since last position measurement
+                now = time.time()
+                elapsed = now - last_time
+                print(f"[CONTROL] Time since last position: {elapsed:.3f}s")
+                last_time = now
                 # Compute control output using PID
                 control_output = self.update_pid(position)
                 # Send control command to servo (real or simulated)
@@ -128,8 +135,9 @@ class BasicPIDController:
                 self.position_log.append(position)
                 self.setpoint_log.append(self.setpoint)
                 self.control_log.append(control_output)
-                print(f"Pos: {position:.3f}m, Output: {control_output:.1f}°")
+                print(f"[CONTROL] Thread running] Pos: {position:.3f}m, Output: {control_output:.1f}°")
             except queue.Empty:
+                print("[CONTROL] Skipping because no position data available")
                 continue
             except Exception as e:
                 print(f"[CONTROL] Error: {e}")
@@ -151,7 +159,7 @@ class BasicPIDController:
         # Kp slider
         ttk.Label(self.root, text="Kp (Proportional)", font=("Arial", 12)).pack()
         self.kp_var = tk.DoubleVar(value=self.Kp)
-        kp_slider = ttk.Scale(self.root, from_=0, to=100, variable=self.kp_var,
+        kp_slider = ttk.Scale(self.root, from_=0, to=2, variable=self.kp_var,
                               orient=tk.HORIZONTAL, length=500)
         kp_slider.pack(pady=5)
         self.kp_label = ttk.Label(self.root, text=f"Kp: {self.Kp:.1f}", font=("Arial", 11))

@@ -14,7 +14,7 @@ class BallDetector:
         """Initialize ball detector with HSV bounds from config file.
         
         Args:
-            config_file (str): Path to JSON config file with HSV bounds and calibration
+            config_file (str): Path to JSON conf0Fig file with HSV bounds and calibration
         """
         # Default HSV bounds for orange ball detection
         self.lower_hsv = np.array([5, 150, 150], dtype=np.uint8)  # Orange lower bound
@@ -40,8 +40,8 @@ class BallDetector:
                         frame_width = config.get('camera', {}).get('frame_width', 640)
                         self.scale_factor = config['calibration']['pixel_to_meter_ratio'] * (frame_width / 2)
                 
-                print(f"[BALL_DETECT] Loaded HSV bounds: {self.lower_hsv} to {self.upper_hsv}")
-                print(f"[BALL_DETECT] Scale factor: {self.scale_factor:.6f} m/normalized_unit")
+                # print(f"[BALL_DETECT] Loaded HSV bounds: {self.lower_hsv} to {self.upper_hsv}")
+                # print(f"[BALL_DETECT] Scale factor: {self.scale_factor:.6f} m/normalized_unit")
                 
             except Exception as e:
                 print(f"[BALL_DETECT] Config load error: {e}, using defaults")
