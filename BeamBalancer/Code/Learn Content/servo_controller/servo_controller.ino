@@ -13,7 +13,7 @@ bool newCommand = false;
 
 void setup() {
   // Initialize serial communication
-  Serial.begin(9600);
+  Serial.begin(115200);
   
   // Attach servo
   beamServo.attach(servoPin);
@@ -25,7 +25,7 @@ void setup() {
   targetAngle = NEUTRAL_ANGLE;
   
   // Optional: Send ready message
-  Serial.println("Arduino servo controller ready");
+  Serial.println("Arduino servo controller ready. Echo off.");
 }
 
 void loop() {
@@ -47,10 +47,7 @@ void loop() {
     newCommand = false;
     
     // Optional: Echo back the angle for debugging
-    Serial.print("Angle set to: ");
-    Serial.println(targetAngle);
+    // Serial.print("Angle set to: ");
+    // Serial.println(targetAngle);
   }
-  
-  // Small delay for stability
-  delay(10);
 }
