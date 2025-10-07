@@ -17,9 +17,9 @@ class BasicPIDController:
         with open(config_file, 'r') as f:
             self.config = json.load(f)
         # PID gains (controlled by sliders in GUI)
-        self.Kp = 1.0
-        self.Ki = 0.0
-        self.Kd = 0.0
+        self.Kp = 1.8
+        self.Ki = 0.6
+        self.Kd = 0.9
         # Scale factor for converting from pixels to meters
         self.scale_factor = self.config['calibration']['pixel_to_meter_ratio'] * self.config['camera']['frame_width'] / 2
         # Servo port name and center angle

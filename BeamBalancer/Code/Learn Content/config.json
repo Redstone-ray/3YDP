@@ -20,8 +20,8 @@
   },
   "calibration": {
     "pixel_to_meter_ratio": 0.0005647413,
-    "position_min_m": null,
-    "position_max_m": null
+    "position_min_m": -0.09,
+    "position_max_m": 0.09
   },
   "servo": {
     "port": "COM3",
