@@ -18,8 +18,8 @@ class BasicPIDController:
             self.config = json.load(f)
         # PID gains (controlled by sliders in GUI)
         self.Kp = 2.5
-        self.Ki = 0.3
-        self.Kd = 0.9
+        self.Ki = 0.5
+        self.Kd = 1.0
         # Scale factor for converting from pixels to meters
         self.scale_factor = self.config['calibration']['pixel_to_meter_ratio'] * self.config['camera']['frame_width'] / 2
         # Servo port name and center angle
@@ -97,7 +97,8 @@ class BasicPIDController:
         # Proportional term
         P = self.Kp * error
         # Integral term accumulation
-        self.integral += error * dt
+        if error < 10:  # Prevent integral windup for large errors
+            self.integral += error * dt
         I = self.Ki * self.integral
         # Derivative term calculation
         derivative = (error - self.prev_error) / dt
