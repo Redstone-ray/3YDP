@@ -1,3 +1,4 @@
 # Ignore SolidWorks temporary files
-~$*
+*~$*
 *.bak
+*.pyc

@@ -1,0 +1,10 @@
+{
+    // Python environment for 3YDP project
+    "python.defaultInterpreterPath": "C:\\Users\\sengu\\miniconda3\\envs\\mte_380_env\\python.exe",
+    
+    // Auto-activate conda environment when terminal opens
+    "python.terminal.activateEnvironment": true,
+    
+    // Ensure conda is used for environment activation
+    "python.terminal.activateEnvInCurrentTerminal": true
+}
