@@ -10,7 +10,7 @@ const int SERVO2_PORT = 1;
 const int SERVO3_PORT = 2;
 
 const int MIN_ANGLE = 0;
-const int MAX_ANGLE = 45;
+const int MAX_ANGLE = 37;
 const int NEUTRAL_ANGLE = 15;
 
 // Servo pulse length settings (typical for 50Hz servos)
