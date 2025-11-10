@@ -11,14 +11,13 @@
 #define U(element) 			(*uPtrs[element])
 
 /* Parameters. */
-#define xpla	 			PAR(0)	/* Plane length [m]. */
-#define ypla	 			PAR(1)	/* Plane width [m]. */
-#define zpla	 			PAR(2)	/* Plane thickness [m]. */
-#define rbal	 			PAR(3)	/* Ball radius [m]. */
-#define Kpen	 			PAR(4)	/* Spring constant [N/m]. */
-#define Dpen	 			PAR(5)	/* Damping constant [N.s/m]. */
-#define mustat	 			PAR(6)	/* Static friction constant [ ]. */
-#define vthr	 			PAR(7)	/* Friction threshold speed [m/s]. */
+#define rpla  PAR(0)   /* Disk radius [m]. */
+#define zpla  PAR(1)
+#define rbal  PAR(2)
+#define Kpen  PAR(3)
+#define Dpen  PAR(4)
+#define mustat PAR(5)
+#define vthr  PAR(6)
 
 /* Inputs. */
 #define xpos                U(0)    /* Ball position in x-direction. */
@@ -38,7 +37,7 @@
 
 /* Initialization. */
 static void mdlInitializeSizes(SimStruct *S) {
-    ssSetNumSFcnParams(S, 8);  
+    ssSetNumSFcnParams(S, 7);  
    if (ssGetNumSFcnParams(S) != ssGetSFcnParamsCount(S)) {
         /* Return if number of expected != number of actual parameters */
         return;
@@ -96,7 +95,9 @@ static void mdlOutputs(SimStruct *S, int_T tid) {
     cgap = zpla/2+rbal;
         
     /* Support force Fz (eq 1) when the ball is on the plate, and simulation time is post initialization . */
-    if (pz<cgap && fabs(xpos)<xpla/2 && fabs(ypos)<ypla/2 && Tsim>0.001) 
+    /* inside-disk test: center within radius rpla */
+    if (pz < cgap && (xpos*xpos + ypos*ypos) <= (rpla*rpla) && Tsim > 0.001)
+
         Fz = -Kpen*(pz-cgap)-Dpen*vz;
     else
         Fz = 0;
