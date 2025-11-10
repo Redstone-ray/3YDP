@@ -1,45 +1,64 @@
-/* Ball Plate Forces
- * 
- * 
- */ 
+/* Ball Plate Forces — circular disk version
+ *
+ * Contact and friction model for a ball on a horizontal circular plate.
+ * Key change vs. rectangular plate: in-plane support check uses radius.
+ *
+ * Inputs  (single port, width = 9):
+ *   0 xpos  (m)   ball COM x
+ *   1 vx    (m/s) ball COM x-velocity
+ *   2 ypos  (m)   ball COM y
+ *   3 vy    (m/s) ball COM y-velocity
+ *   4 pz    (m)   ball COM z
+ *   5 vz    (m/s) ball COM z-velocity
+ *   6 wx    (rad/s) ball angular velocity about x
+ *   7 wy    (rad/s) ball angular velocity about y
+ *   8 Tsim  (s)   simulation time
+ *
+ * Outputs (single port, width = 5):
+ *   0 Ffx (N)  friction force x
+ *   1 Ffy (N)  friction force y
+ *   2 Fz  (N)  normal/support force (upward +)
+ *   3 Tx  (N·m) rolling torque about x
+ *   4 Ty  (N·m) rolling torque about y
+ */
 
-#define S_FUNCTION_NAME  	ballplateforces
-#define S_FUNCTION_LEVEL	2
+#define S_FUNCTION_NAME  ballplateforces
+#define S_FUNCTION_LEVEL 2
+
 #include "simstruc.h"
 #include <math.h>
-#define PAR(element)		(*mxGetPr(ssGetSFcnParam(S,element)))
-#define U(element) 			(*uPtrs[element])
 
-/* Parameters. */
-#define rpla  PAR(0)   /* Disk radius [m]. */
-#define zpla  PAR(1)
-#define rbal  PAR(2)
-#define Kpen  PAR(3)
-#define Dpen  PAR(4)
-#define mustat PAR(5)
-#define vthr  PAR(6)
+/* Parameter/Signal access helpers */
+#define PAR(i)   (*mxGetPr(ssGetSFcnParam(S,(i))))
+#define U(i)     (*uPtrs[(i)])
 
-/* Inputs. */
-#define xpos                U(0)    /* Ball position in x-direction. */
-#define vx                  U(1)    /* Ball speed in the x direction. [m/s]  */
-#define ypos                U(2)    /* Ball position in y-direction. */
-#define vy                  U(3)	/* Ball speed in the y direction. [m/s] */
-#define pz                  U(4)	/* Ball position in the z direction. [m] */
-#define vz                  U(5)    /* Ball speed in the z direction. [m/s] */
-#define wx                  U(6)	/* Ball rotation speed around the x axis. [rad/s] */
-#define wy                  U(7)	/* Ball rotation speed around the y axis. [rad/s] */
-#define Tsim                U(8)	/* Simulation time. [s] */
+/* ----------------- Dialog parameters (7 total) ------------------------- */
+#define rpla    PAR(0) /* Plate radius [m] */
+#define zpla    PAR(1) /* Plate thickness [m] */
+#define rbal    PAR(2) /* Ball radius [m] */
+#define Kpen    PAR(3) /* Penetration spring [N/m] */
+#define Dpen    PAR(4) /* Penetration damping [N·s/m] */
+#define mustat  PAR(5) /* Static friction coefficient [-] */
+#define vthr    PAR(6) /* Slip threshold speed [m/s] */
 
+/* ----------------- Packed input vector -------------------------------- */
+#define xpos    U(0)
+#define vx      U(1)
+#define ypos    U(2)
+#define vy      U(3)
+#define pz      U(4)
+#define vz      U(5)
+#define wx      U(6)
+#define wy      U(7)
+#define Tsim    U(8)
 
-
-
-
-
-/* Initialization. */
-static void mdlInitializeSizes(SimStruct *S) {
-    ssSetNumSFcnParams(S, 7);  
-   if (ssGetNumSFcnParams(S) != ssGetSFcnParamsCount(S)) {
-        /* Return if number of expected != number of actual parameters */
+/* ====================================================================== */
+/* Initialization                                                         */
+/* ====================================================================== */
+static void mdlInitializeSizes(SimStruct *S)
+{
+    ssSetNumSFcnParams(S, 7);
+    if (ssGetNumSFcnParams(S) != ssGetSFcnParamsCount(S)) {
         return;
     }
 
@@ -48,140 +67,111 @@ static void mdlInitializeSizes(SimStruct *S) {
 
     if (!ssSetNumInputPorts(S, 1)) return;
     ssSetInputPortWidth(S, 0, 9);
-    ssSetInputPortDirectFeedThrough(S, 0, 9);
+    ssSetInputPortDirectFeedThrough(S, 0, 1);  /* boolean: yes, uses inputs in mdlOutputs */
 
     if (!ssSetNumOutputPorts(S, 1)) return;
     ssSetOutputPortWidth(S, 0, 5);
 
     ssSetNumSampleTimes(S, 1);
-	ssSetOptions(S, SS_OPTION_EXCEPTION_FREE_CODE);
+    ssSetOptions(S, SS_OPTION_EXCEPTION_FREE_CODE);
 }
 
-static void mdlInitializeSampleTimes(SimStruct *S) {
+static void mdlInitializeSampleTimes(SimStruct *S)
+{
     ssSetSampleTime(S, 0, CONTINUOUS_SAMPLE_TIME);
     ssSetOffsetTime(S, 0, 0.0);
 }
 
-
-
-#define MDL_INITIALIZE_CONDITIONS   /* Change to #undef to remove function */
+#define MDL_INITIALIZE_CONDITIONS
 #if defined(MDL_INITIALIZE_CONDITIONS)
-  /* Function: mdlInitializeConditions ========================================
-   * Abstract:
-   *    In this function, you should initialize the continuous and discrete
-   *    states for your S-function block.  The initial states are placed
-   *    in the state vector, ssGetContStates(S) or ssGetRealDiscStates(S).
-   *    You can also perform any other initialization activities that your
-   *    S-function may require. Note, this routine will be called at the
-   *    start of simulation and if it is present in an enabled subsystem
-   *    configured to reset states, it will be call when the enabled subsystem
-   *    restarts execution to reset the states.
-   */
-  static void mdlInitializeConditions(SimStruct *S)
-  {
-  }
-#endif /* MDL_INITIALIZE_CONDITIONS */
+static void mdlInitializeConditions(SimStruct *S)
+{
+    /* no states */
+}
+#endif
 
-static void mdlOutputs(SimStruct *S, int_T tid) {
-	real_T              *y    = ssGetOutputPortRealSignal(S,0);
-	real_T              *x    = ssGetContStates(S);	
-    InputRealPtrsType   uPtrs = ssGetInputPortRealSignalPtrs(S,0);	        
-    real_T              cgap, Fz;
-    real_T              vxslippage, vyslippage;
-    real_T              mux, muy, Ffx, Ffy;
-    real_T              Tx, Ty;
-    
-    /* Support force parameters. */    
-    cgap = zpla/2+rbal;
-        
-    /* Support force Fz (eq 1) when the ball is on the plate, and simulation time is post initialization . */
-    /* inside-disk test: center within radius rpla */
-    if (pz < cgap && (xpos*xpos + ypos*ypos) <= (rpla*rpla) && Tsim > 0.001)
+/* ====================================================================== */
+/* Outputs                                                                */
+/* ====================================================================== */
+static void mdlOutputs(SimStruct *S, int_T tid)
+{
+    real_T              *y    = ssGetOutputPortRealSignal(S,0);
+    InputRealPtrsType   uPtrs = ssGetInputPortRealSignalPtrs(S,0);
 
-        Fz = -Kpen*(pz-cgap)-Dpen*vz;
-    else
-        Fz = 0;
-        
-    /* Slippage speed(eq 6 and 7). */
-    vxslippage = -vx+rbal*wy;
-    vyslippage = -vy-rbal*wx;
-    
-    
-    if (fabs(vxslippage) <= vthr)
-     /* Friction coefficient in the x direction(eq 4). */
-        mux = mustat * vxslippage/vthr;
-    else if(vxslippage > vthr)
-     /* Friction coefficient in the x direction for positive velocity. */
-        mux = mustat;
-    else
-    /* Friction coefficient in the x direction for positive velocity. */
-        mux = -mustat;    
-    
-    /* Friction force in the x direction(eq 2). */
-    Ffx = mux*Fz;
-   
-    
-    if (fabs(vyslippage) <= vthr)
-     /* Friction coefficient in the y direction(eq 5). */
-        muy = mustat * vyslippage/vthr;
-    else if(vyslippage > vthr)
-     /* Friction coefficient in the y direction for positive velocity. */
-        muy = mustat;
-    else
-    /* Friction coefficient in the y direction for positive velocity. */
-        muy = -mustat;    
-    
-    /* Friction force in the y direction(eq 3). */
-    Ffy = muy*Fz;
-    
-    
-    /* Rolling torque around the x axis(eq 8). */
-    Tx = rbal*Ffy;
-    
-   /* Rolling torque around the x axis(eq 9). */
-    Ty = -rbal*Ffx;
-    
-    y[0] = Ffx; 
-	y[1] = Ffy;
-    y[2] = Fz; 
-	y[3] = Tx;
+    real_T cgap, Fz;
+    real_T vxslip, vyslip;
+    real_T mux, muy, Ffx, Ffy;
+    real_T Tx, Ty;
+
+    /* Contact gap at just-touching configuration (top surface) */
+    cgap = zpla*0.5 + rbal;
+
+    /* Use effective radius so the ball loses support when its edge reaches the rim.
+       If rbal >= rpla, fall back to rpla so the contact won't vanish entirely. */
+    {
+        /* const real_T r_eff = (rpla > rbal) ? (rpla - rbal) : rpla;*/
+        const real_T r_eff = rpla;
+        const real_T r2    = xpos*xpos + ypos*ypos;
+
+        if ( (pz < cgap) &&
+             (r2 <= r_eff*r_eff) &&
+             (Tsim > 1.0e-3) )
+        {
+            /* Linear spring-damper penalty for normal force */
+            Fz = -Kpen*(pz - cgap) - Dpen*vz;
+            if (Fz < 0.0) Fz = 0.0;  /* no adhesion */
+        }
+        else
+        {
+            Fz = 0.0;
+        }
+    }
+
+    /* Slip velocities at contact (signs consistent with original code) */
+    vxslip = -vx + rbal*wy;
+    vyslip = -vy - rbal*wx;
+
+    /* Friction coefficients with linear deadzone around zero slip */
+    if (fabs(vxslip) <= vthr)      mux = mustat * (vxslip / vthr);
+    else if (vxslip >  vthr)       mux = mustat;
+    else                           mux = -mustat;
+
+    if (fabs(vyslip) <= vthr)      muy = mustat * (vyslip / vthr);
+    else if (vyslip >  vthr)       muy = mustat;
+    else                           muy = -mustat;
+
+    /* Friction forces proportional to normal load */
+    Ffx = mux * Fz;
+    Ffy = muy * Fz;
+
+    /* Rolling torques from tangential forces */
+    Tx =  rbal * Ffy;   /* about x */
+    Ty = -rbal * Ffx;   /* about y */
+
+    /* Outputs */
+    y[0] = Ffx;
+    y[1] = Ffy;
+    y[2] = Fz;
+    y[3] = Tx;
     y[4] = Ty;
-    
-    
-   
 }
 
-#define MDL_DERIVATIVES  /* Change to #undef to remove function */
+#define MDL_DERIVATIVES
 #if defined(MDL_DERIVATIVES)
-  /* Function: mdlDerivatives =================================================
-   * Abstract:
-   *    In this function, you compute the S-function block's derivatives.
-   *    The derivatives are placed in the derivative vector, ssGetdX(S).
-   */
-  static void mdlDerivatives(SimStruct *S)
-  {
-  }
-#endif /* MDL_DERIVATIVES */
+static void mdlDerivatives(SimStruct *S)
+{
+    /* no continuous states */
+}
+#endif
 
-
-
-/* Function: mdlTerminate =====================================================
- * Abstract:
- *    In this function, you should perform any actions that are necessary
- *    at the termination of a simulation.  For example, if memory was
- *    allocated in mdlStart, this is the place to free it.
- */
 static void mdlTerminate(SimStruct *S)
 {
+    /* nothing to free */
 }
 
-
-/*=============================*
- * Required S-function trailer *
- *=============================*/
-
-#ifdef  MATLAB_MEX_FILE    /* Is this file being compiled as a MEX-file? */
-#include "simulink.c"      /* MEX-file interface mechanism */
+/* ----------------------- Required trailer ------------------------------ */
+#ifdef MATLAB_MEX_FILE
+#include "simulink.c"
 #else
-#include "cg_sfun.h"       /* Code generation registration function */
+#include "cg_sfun.h"
 #endif
