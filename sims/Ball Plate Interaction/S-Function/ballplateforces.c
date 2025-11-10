@@ -1,8 +1,5 @@
 /* Ball Plate Forces — circular disk version
- *
- * Contact and friction model for a ball on a horizontal circular plate.
- * Key change vs. rectangular plate: in-plane support check uses radius.
- *
+
  * Inputs  (single port, width = 9):
  *   0 xpos  (m)   ball COM x
  *   1 vx    (m/s) ball COM x-velocity
@@ -106,8 +103,6 @@ static void mdlOutputs(SimStruct *S, int_T tid)
     /* Contact gap at just-touching configuration (top surface) */
     cgap = zpla*0.5 + rbal;
 
-    /* Use effective radius so the ball loses support when its edge reaches the rim.
-       If rbal >= rpla, fall back to rpla so the contact won't vanish entirely. */
     {
         /* const real_T r_eff = (rpla > rbal) ? (rpla - rbal) : rpla;*/
         const real_T r_eff = rpla;
@@ -127,11 +122,9 @@ static void mdlOutputs(SimStruct *S, int_T tid)
         }
     }
 
-    /* Slip velocities at contact (signs consistent with original code) */
     vxslip = -vx + rbal*wy;
     vyslip = -vy - rbal*wx;
 
-    /* Friction coefficients with linear deadzone around zero slip */
     if (fabs(vxslip) <= vthr)      mux = mustat * (vxslip / vthr);
     else if (vxslip >  vthr)       mux = mustat;
     else                           mux = -mustat;
