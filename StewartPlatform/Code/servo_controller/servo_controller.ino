@@ -10,13 +10,15 @@ const int SERVO2_PORT = 1;
 const int SERVO3_PORT = 2;
 
 const int MIN_ANGLE = 0;
-const int MAX_ANGLE = 37;
-const int NEUTRAL_ANGLE = 15;
+const int MAX_ANGLE = 300;  // 300° range of motion
+const int NEUTRAL_ANGLE = 150;  // Neutral at center of 300° range
 
-// Servo pulse length settings (typical for 50Hz servos)
-// These values may need tuning for your specific servos
-#define SERVOMIN  150  // Minimum pulse length count (out of 4096)
-#define SERVOMAX  600  // Maximum pulse length count (out of 4096)
+// Servo pulse length settings for 300° servo (500μS ~ 2500μS)
+// At 50Hz (20ms period), 4096 counts per period
+// 500μS = (500/20000) * 4096 ≈ 102 counts
+// 2500μS = (2500/20000) * 4096 ≈ 512 counts
+#define SERVOMIN  102  // Minimum pulse length (500μS)
+#define SERVOMAX  512  // Maximum pulse length (2500μS)
 
 // Communication variables
 int targetAngles[3] = {NEUTRAL_ANGLE, NEUTRAL_ANGLE, NEUTRAL_ANGLE};
@@ -24,9 +26,9 @@ bool newCommand = false;
 
 // Helper function to convert angle to PWM pulse length
 uint16_t angleToPulse(int angle) {
-  // Map angle (0-180) to pulse length (SERVOMIN-SERVOMAX)
-  // Adjust the 0-180 range if your servos use a different range
-  return map(angle, 0, 180, SERVOMIN, SERVOMAX);
+  // Map angle (0-300) to pulse length (SERVOMIN-SERVOMAX)
+  // 300° servo with 500μS to 2500μS pulse width range
+  return map(angle, 0, 300, SERVOMIN, SERVOMAX);
 }
 
 void setup() {
