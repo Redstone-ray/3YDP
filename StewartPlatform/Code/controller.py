@@ -608,11 +608,11 @@ if __name__ == "__main__":
         platform_height=10.6,
         setpoint_x=0.0,
         setpoint_y=0.0,
-        pid_kp=0.05,      # Increased Kp for heavier ball
-        pid_ki=0.001,     # Small integral to handle steady-state error
-        pid_kd=0.08,      # Increased Kd for damping (counters inertia)
-        pid_pf=0.05,       # Feedforward gain for velocity compensation
-        max_tilt=10.0,
+        pid_kp=0.055,      # Increased Kp for heavier ball
+        pid_ki=0.01,     # Small integral to handle steady-state error
+        pid_kd=0.03,      # Increased Kd for damping (counters inertia)
+        pid_pf=0.0,       # Feedforward gain for velocity compensation
+        max_tilt=14.0,
         enable_spv4_viz=False,   # Disable 3D platform visualization
         enable_forcen_viz=False   # Keep ball position visualization
     ) as controller:
