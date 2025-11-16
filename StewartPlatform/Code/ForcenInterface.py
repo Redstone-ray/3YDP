@@ -32,7 +32,8 @@ class ForcenInterface:
     
     def __init__(self, com_port, baud_rate=115200, sample_rate=100, 
                  arm_cog_x=0.0, arm_cog_y=0.0, arm_cog_z=0.0, 
-                 arm_weight=0.0, arm_length_z=0.0, arm_weight_confidence=0.0):
+                 arm_weight=0.0, arm_length_z=0.0, arm_weight_confidence=0.0,
+                 rotation_angle=0.0, scale_x=1.0, scale_y=1.0, flip_x=False, flip_y=False):
         """
         Initialize the Forcen Interface.
         
@@ -56,11 +57,45 @@ class ForcenInterface:
             ARM LENGTH Z - Distance to loading point in meters (Register U4)
         arm_weight_confidence : float
             ARM WEIGHT CONFIDENCE - Confidence ratio 0-1 (Register U5, default: 0.0)
+        rotation_angle : float
+            Angle in degrees to rotate the coordinate frame (counter-clockwise, default: 0.0)
+            Used to align sensor coordinate frame with real-world coordinate frame
+        scale_x : float
+            Scale factor for X-axis radial distance correction (default: 1.0)
+        scale_y : float
+            Scale factor for Y-axis radial distance correction (default: 1.0)
+        flip_x : bool
+            Flip X-axis after rotation (default: False)
+        flip_y : bool
+            Flip Y-axis after rotation (default: False)
         """
         self.com_port = com_port
         self.baud_rate = baud_rate
         self.sample_rate = sample_rate
         self.serial_connection = None
+        
+        # Position transformation parameters
+        self.offset_x = 0.0  # Calibrated during initialization
+        self.offset_y = 0.0  # Calibrated during initialization
+        self.offset_weight = 0.0  # Weight offset in grams
+        self.offsets_calibrated = False
+        self.rotation_angle = rotation_angle  # Degrees
+        self.rotation_rad = rotation_angle * 3.14159265359 / 180.0  # Convert to radians
+        self.scale_x = scale_x  # Radial scale factor for X
+        self.scale_y = scale_y  # Radial scale factor for Y
+        self.flip_x = flip_x  # Flip X after rotation
+        self.flip_y = flip_y  # Flip Y after rotation
+        
+        # Print transformation parameters for debugging
+        if rotation_angle != 0.0 or scale_x != 1.0 or scale_y != 1.0 or flip_x or flip_y:
+            print(f"Coordinate transformations enabled:")
+            print(f"  Rotation: {rotation_angle}°")
+            print(f"  Scale X: {scale_x}")
+            print(f"  Scale Y: {scale_y}")
+            if flip_x:
+                print(f"  Flip X: True")
+            if flip_y:
+                print(f"  Flip Y: True")
         
         # Store Table 6 parameters
         self.parameters = {
@@ -321,19 +356,66 @@ class ForcenInterface:
         
         # Step 3: Initiate calibration <SDM5>
         print("\nInitiating calibration mode...")
+        print("Sensor should be VERTICAL and STATIONARY...")
+        self._clear_buffer()
         response = self._send_command(self.CMD_CALIBRATION_MODE, expect_ack=True, timeout=3)
         if response:
-            print(f"✓ Response: {response}")
+            print(f"✓ Initial Response: {response}")
         else:
             print("⚠ No acknowledgment received")
         
+        # Step 4: Monitor calibration status codes
+        print("\nMonitoring calibration process...")
+        print("(Sensor is collecting data and calculating offsets...)\n")
+        
+        calibration_complete = False
+        calibration_success = False
+        start_time = time.time()
+        max_wait_time = 30  # 30 seconds should be enough for vertical-only
+        last_status = None
+        
+        while not calibration_complete and (time.time() - start_time) < max_wait_time:
+            # Read any incoming data (status codes)
+            if self.serial_connection.in_waiting > 0:
+                try:
+                    line = self.serial_connection.readline().decode('ascii').strip()
+                    if line and line.startswith('<') and line.endswith('>'):
+                        # Extract code from <rXXXX> or <aXXXX> format
+                        code = line[1:-1]  # Remove < and >
+                        
+                        # Print all status codes
+                        print(f"  {line}")
+                        
+                        # Check for completion codes
+                        if code == 'r0x0':
+                            calibration_complete = True
+                            calibration_success = True
+                        elif code == 'r0xE0':
+                            calibration_complete = True
+                            calibration_success = True
+                except Exception as e:
+                    pass
+            
+            time.sleep(0.05)
+        
+        if not calibration_complete:
+            print("\n⚠ Calibration timeout - no completion code received")
+            print("   Sensor may still be processing. Check manually.")
+            calibration_success = False
+        
         print("\n" + "="*50)
-        print("Calibration command sequence complete!")
+        if calibration_success:
+            print("    CALIBRATION COMPLETED SUCCESSFULLY")
+        else:
+            print("    CALIBRATION STATUS UNCERTAIN")
         print("="*50)
         
-        time.sleep(1)
+        if not calibration_success:
+            return False
         
-        # Step 4: Save to EEPROM based on parameter or prompt
+        time.sleep(0.5)
+        
+        # Step 5: Save to EEPROM based on parameter or prompt
         if save_to_eeprom is None:
             print("\n" + "-"*50)
             save_choice = input("Save calibration to sensor EEPROM? (y/n): ").strip().lower()
@@ -346,16 +428,25 @@ class ForcenInterface:
             
             if response and self.RESPONSE_SAVE_SUCCESS in response:
                 print("✓ Calibration saved successfully!")
-                print("\n" + "="*50)
-                print("      CALIBRATION COMPLETE")
-                print("="*50 + "\n")
-                return True
+            else:
+                print(f"⚠ Save response: {response}")
         else:
             print("\nCalibration not saved. Settings will be lost on power cycle.")
-            print("\n" + "="*50)
-            print("   CALIBRATION COMPLETE - NOT SAVED")
-            print("="*50 + "\n")
-            return True
+        
+        # Step 6: Calibrate position offsets
+        print("\n" + "-"*50)
+        print("Calibrating position and weight offsets...")
+        if self._calibrate_position_offsets(target_weight=0):  # 531g + 268g for aligning jig weight
+            print(f"✓ Position offsets calibrated: X={self.offset_x:.2f}mm, Y={self.offset_y:.2f}mm")
+            print(f"✓ Weight offset calibrated: {self.offset_weight:.2f}g")
+        else:
+            print("⚠ Could not calibrate offsets")
+        
+        print("\n" + "="*50)
+        print("      CALIBRATION PROCESS COMPLETE")
+        print("="*50 + "\n")
+        
+        return True
     
     def read_data(self):
         """Read one frame of real-time data from sensor."""
@@ -392,6 +483,87 @@ class ForcenInterface:
         except:
             return None
     
+    def _calibrate_position_offsets(self, num_samples=20, target_weight=531.0):
+        """
+        Calibrate position and weight offsets by averaging current ball position and weight.
+        Assumes ball is at center of platform during calibration.
+        
+        Parameters:
+        -----------
+        num_samples : int
+            Number of samples to average for offset calculation
+        target_weight : float
+            Expected weight in grams (default: 531.0)
+        
+        Returns:
+        --------
+        bool : True if successful
+        """
+        x_samples = []
+        y_samples = []
+        weight_samples = []
+        
+        # Collect samples
+        for i in range(num_samples):
+            data = self.read_data()
+            if data:
+                x, y = self._estimate_ball_position_raw(data)
+                if x is not None and y is not None:
+                    x_samples.append(x)
+                    y_samples.append(y)
+                    # Use sensor's Weight field (already in grams)
+                    # NOTE: Weight field is inverted - negate it
+                    if 'Weight' in data:
+                        weight_samples.append(-data['Weight'])
+                    elif 'Fz' in data:
+                        # Fallback to Fz if Weight not available
+                        weight_g = data['Fz'] / 9.81
+                        weight_samples.append(weight_g)
+            time.sleep(0.05)  # 50ms between samples
+        
+        # Calculate offsets if we got enough samples
+        if len(x_samples) >= num_samples // 2:
+            self.offset_x = sum(x_samples) / len(x_samples)
+            self.offset_y = sum(y_samples) / len(y_samples)
+            
+            # Calculate weight offset
+            avg_weight = sum(weight_samples) / len(weight_samples)
+            self.offset_weight = target_weight - avg_weight
+            
+            self.offsets_calibrated = True
+            return True
+        
+        return False
+    
+    def get_weight(self, data):
+        """
+        Get calibrated weight from sensor data.
+        
+        Parameters:
+        -----------
+        data : dict
+            Sensor data containing 'Weight' or 'Fz'
+        
+        Returns:
+        --------
+        float : Weight in grams with offset applied, or None if cannot calculate
+        """
+        if not data:
+            return None
+        
+        # Prefer sensor's Weight field (already in grams)
+        # NOTE: Weight field is inverted - negate it
+        if 'Weight' in data:
+            weight_g = -data['Weight']
+        elif 'Fz' in data:
+            # Fallback to converting Fz if Weight not available
+            weight_g = data['Fz'] / 9.81
+        else:
+            return None
+        
+        # Apply offset
+        return weight_g + self.offset_weight
+    
     def start_streaming(self):
         """
         Put the device in RUNNING mode to start streaming real-time data (RTD).
@@ -408,19 +580,14 @@ class ForcenInterface:
         
         if success:
             print("✓ Data streaming started")
-            # Give sensor time to start streaming
-            time.sleep(0.5)
         else:
             print(f"✗ Failed to start streaming. Response: {response}")
         
         return success
     
-    def estimate_ball_position(self, data):
+    def _estimate_ball_position_raw(self, data):
         """
-        Estimate the position of a ball on a circular platform using sensor data.
-        
-        The ball creates moments around X and Y axes based on its position.
-        Moment = Force × Distance, so Distance = Moment / Force
+        Raw position estimation without offset correction.
         
         Parameters:
         -----------
@@ -453,6 +620,60 @@ class ForcenInterface:
         x = My / Fz_N  # mm
         
         return (x, y)
+    
+    def estimate_ball_position(self, data):
+        """
+        Estimate the position of a ball on a circular platform using sensor data.
+        Applies calibrated offsets, rotation, and scaling to align with real-world coordinates.
+        
+        The ball creates moments around X and Y axes based on its position.
+        Moment = Force × Distance, so Distance = Moment / Force
+        
+        Transformation order:
+        1. Calculate raw position from sensor data
+        2. Apply center offset correction (in raw sensor frame)
+        3. Apply radial scale factors (still in sensor frame)
+        4. Apply coordinate frame rotation (to align with real-world frame)
+        
+        Parameters:
+        -----------
+        data : dict
+            Sensor data containing 'Mx', 'My', and 'Fz'
+        
+        Returns:
+        --------
+        tuple : (x, y) position in mm with all transformations applied, or (None, None) if cannot calculate
+        """
+        x_raw, y_raw = self._estimate_ball_position_raw(data)
+        
+        if x_raw is None or y_raw is None:
+            return (None, None)
+        
+        # Step 1: Apply center offset correction (subtract raw offsets in sensor frame)
+        x_centered = x_raw - self.offset_x
+        y_centered = y_raw - self.offset_y
+        
+        # Step 2: Apply radial scale factors (still in sensor frame)
+        x_scaled = x_centered * self.scale_x
+        y_scaled = y_centered * self.scale_y
+        
+        # Step 3: Apply rotation to align sensor frame with real-world frame
+        # Rotation matrix: [cos(θ) -sin(θ)] [x]
+        #                  [sin(θ)  cos(θ)] [y]
+        import math
+        cos_theta = math.cos(self.rotation_rad)
+        sin_theta = math.sin(self.rotation_rad)
+        
+        x_final = x_scaled * cos_theta - y_scaled * sin_theta
+        y_final = x_scaled * sin_theta + y_scaled * cos_theta
+        
+        # Step 4: Apply axis flips if needed (after rotation)
+        if self.flip_x:
+            x_final = -x_final
+        if self.flip_y:
+            y_final = -y_final
+        
+        return (x_final, y_final)
     
     def visualize_ball_position(self):
         """
@@ -519,10 +740,15 @@ if __name__ == "__main__":
         sample_rate=100,
         arm_cog_x=0.0,
         arm_cog_y=0.0,
-        arm_cog_z=0.0,
-        arm_weight=0.0,
-        arm_length_z=0.0,
-        arm_weight_confidence=0.0,
+        arm_cog_z=0.005,  # 5 mm
+        arm_weight=1.2,    # 1.2 kg
+        arm_length_z=0.009,  # 9 mm
+        arm_weight_confidence=0.7,
+        rotation_angle=135,  # Rotate coordinate frame (degrees, counter-clockwise)
+        scale_x=1.1,         # X-axis radial scale factor
+        scale_y=1.1,         # Y-axis radial scale factor
+        flip_x=False,        # Flip X-axis after rotation
+        flip_y=True,         # Flip Y-axis after rotation
     )
     
     # Using context manager
@@ -566,8 +792,8 @@ if __name__ == "__main__":
                         # Update ball position
                         ball.center = (x, y)
                         
-                        # Get weight (convert force from mN to grams using g=9.81 m/s^2)
-                        weight_g = data['Fz'] / 9.81  # mN / (m/s^2) = mg = grams
+                        # Get calibrated weight
+                        weight_g = sensor.get_weight(data)
                         
                         # Update coordinate text with position and weight
                         coord_text.set_text(
@@ -576,11 +802,16 @@ if __name__ == "__main__":
                             f'Weight: {weight_g:5.1f} g'
                         )
                         
-                        # Check if ball is outside platform
+                        # Check if ball is outside platform or weight dropped
                         distance_from_center = (x**2 + y**2)**0.5
-                        if distance_from_center > 150:
+                        if weight_g < 300:  # Weight dropped significantly (below 300g)
+                            ball.set_color('grey')
+                            ball.set_alpha(0.3)  # Translucent
+                        elif distance_from_center > 150:
+                            ball.set_color('orange')
                             ball.set_alpha(0.4)  # Dim if outside
                         else:
+                            ball.set_color('orange')
                             ball.set_alpha(0.8)  # Normal brightness
                         
                         # Update plot
@@ -598,7 +829,7 @@ if __name__ == "__main__":
                         # No position - still show raw data
                         pitch = data.get('Pitch_Angle', 'N/A')
                         pitch_str = f"{pitch:5.1f}°" if pitch != 'N/A' else "  N/A"
-                        weight_g = data['Fz'] / 9.81
+                        weight_g = sensor.get_weight(data)
                         
                         print(f"\rMx:{data['Mx']:7.1f}  My:{data['My']:7.1f}  Fz:{data['Fz']:7.1f}mN  "
                               f"Weight:{weight_g:5.1f}g  Pitch:{pitch_str}  [No position]  ", 
