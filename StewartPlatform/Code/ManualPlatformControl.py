@@ -7,13 +7,17 @@ import matplotlib.pyplot as plt
 from SPV4 import StewartPlatform
 from ServoController import ServoController
 
+# Configure matplotlib for better rendering
+plt.ion()  # Enable interactive mode
+plt.rcParams['figure.raise_window'] = False  # Don't steal focus
+
 # Initialize
 platform = StewartPlatform(l=25.9, l_base=10, l_link1=8, l_link2=10)
 controller = ServoController(
-    port="COM3", visualize=True,
+    port="COM8", visualize=True,
     flip_servo=[True, True, True],
-    neutral_angles=[20, 20, 20],
-    min_servo_angle=0, max_servo_angle=37
+    neutral_angles=[122, 126, 126],
+    min_servo_angle=76, max_servo_angle=155
 )
 
 controller.print_commanded_angle_limits()
@@ -27,15 +31,16 @@ print("\nArrows: Pitch/Roll | I/K: Height | H: Home | ESC: Quit\n")
 
 try:
     last_angles = None
+    frame_count = 0
     while True:
         # Read keys
         if keyboard.is_pressed('esc'): break
-        if keyboard.is_pressed('up'): pitch = min(pitch + 0.3, MAX_ANGLE)
-        if keyboard.is_pressed('down'): pitch = max(pitch - 0.3, -MAX_ANGLE)
-        if keyboard.is_pressed('left'): roll = max(roll - 0.3, -MAX_ANGLE)
-        if keyboard.is_pressed('right'): roll = min(roll + 0.3, MAX_ANGLE)
-        if keyboard.is_pressed('i'): height = min(height + 0.1, MAX_HEIGHT)
-        if keyboard.is_pressed('k'): height = max(height - 0.1, MIN_HEIGHT)
+        if keyboard.is_pressed('up'): pitch = min(pitch + 1, MAX_ANGLE)
+        if keyboard.is_pressed('down'): pitch = max(pitch - 1, -MAX_ANGLE)
+        if keyboard.is_pressed('left'): roll = max(roll - 1, -MAX_ANGLE)
+        if keyboard.is_pressed('right'): roll = min(roll + 1, MAX_ANGLE)
+        if keyboard.is_pressed('i'): height = min(height + 0.3, MAX_HEIGHT)
+        if keyboard.is_pressed('k'): height = max(height - 0.3, MIN_HEIGHT)
         if keyboard.is_pressed('h'):
             pitch, roll, height = 0.0, 0.0, 12.0
         
@@ -55,7 +60,17 @@ try:
             pass  # Ignore unreachable positions
         
         # Process matplotlib events to keep window responsive
-        plt.pause(0.01)
+        # Reduce update frequency to prevent overload
+        frame_count += 1
+        if frame_count % 5 == 0:  # Update display every 5 frames
+            try:
+                plt.gcf().canvas.draw_idle()  # Request draw instead of forcing it
+                plt.gcf().canvas.flush_events()  # Process events without blocking
+            except:
+                pass  # Ignore matplotlib errors
+            time.sleep(0.02)
+        else:
+            time.sleep(0.005)
         
 finally:
     controller.close()
