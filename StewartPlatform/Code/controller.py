@@ -273,9 +273,9 @@ class BallBalancingController:
             return False
         
         # Run calibration
-        # if not self.sensor.calibrate(taring_time=taring_time, save_to_eeprom=save_to_eeprom):
-        #     print("Sensor calibration failed!")
-        #     return False
+        if not self.sensor.calibrate(taring_time=taring_time, save_to_eeprom=save_to_eeprom):
+            print("Sensor calibration failed!")
+            return False
         
         # Start data streaming
         print("\nStarting data stream...")
@@ -468,8 +468,8 @@ class BallBalancingController:
                                  np.sin(pitch_rad), 
                                  np.cos(pitch_rad) * np.cos(roll_rad)]
                         
-                        # 6. Compute inverse kinematics
                         try:
+                            # 6. Compute inverse kinematics
                             ik = self.platform.inverse_kinematics(normal, [0, 0, self.platform_height])
                             angles = [ik['theta_11'], ik['theta_21'], ik['theta_31']]
                             
@@ -560,6 +560,11 @@ class BallBalancingController:
         
         finally:
             self.stop()
+            
+    def go_home(self):
+        neutral_ik = self.platform.inverse_kinematics([0.01, 0.01, 1], [0, 0, self.platform_height])
+        neutral_angles = [neutral_ik['theta_11'], neutral_ik['theta_21'], neutral_ik['theta_31']]
+        self.controller.send_angles(neutral_angles)
     
     def stop(self):
         """Stop the controller and clean up resources."""
@@ -568,13 +573,10 @@ class BallBalancingController:
         # Return to neutral position
         print("\nReturning to neutral position...")
         try:
-            neutral_ik = self.platform.inverse_kinematics([0.01, 0.01, 1], [0, 0, self.platform_height])
-            neutral_angles = [neutral_ik['theta_11'], neutral_ik['theta_21'], neutral_ik['theta_31']]
-            self.controller.send_angles(neutral_angles)
+            self.go_home()
             time.sleep(0.5)
         except:
-            print("could not go home")
-        
+            pass
         # Close connections
         self.controller.close()
         self.sensor.disconnect()
@@ -613,9 +615,16 @@ if __name__ == "__main__":
         pid_kd=0.03,      # Increased Kd for damping (counters inertia)
         pid_pf=0.0,       # Feedforward gain for velocity compensation
         max_tilt=14.0,
-        enable_spv4_viz=False,   # Disable 3D platform visualization
-        enable_forcen_viz=False   # Keep ball position visualization
+        enable_spv4_viz=True,   # Disable 3D platform visualization
+        enable_forcen_viz=True   # Keep ball position visualization
     ) as controller:
+        
+        # Move platform to home position before calibration
+        print("Moving platform to home position...")
+        time.sleep(2)  # Wait for platform to settle and servos to reach position
+        controller.go_home()
+        time.sleep(1)  # Wait for platform to settle and servos to reach position        
+        
         # Calibrate sensor
         if not controller.calibrate_sensor(taring_time=5, save_to_eeprom=False):
             print("Calibration failed! Exiting...")

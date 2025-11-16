@@ -390,6 +390,10 @@ class ForcenInterface:
                         if code == 'r0x0':
                             calibration_complete = True
                             calibration_success = True
+                        elif code == 'r0xD0':
+                            print("⚠ Calibration failed - improper sensor orientation")
+                            calibration_complete = False
+                            calibration_success = False
                         elif code == 'r0xE0':
                             calibration_complete = True
                             calibration_success = True
