@@ -154,7 +154,10 @@ class ServoController:
 
 		# Open the serial port
 		try:
-			self._ser = serial.Serial(self.port, self.baudrate, timeout=self.timeout)
+			self._ser = serial.Serial(self.port, self.baudrate, timeout=self.timeout, write_timeout=0.5)
+			# Clear any stale data in buffers
+			self._ser.reset_input_buffer()
+			self._ser.reset_output_buffer()
 			print(f"Successfully opened {self.port}")
 		except SerialException as e:
 			raise RuntimeError(f"Could not open serial port {self.port}: {e}") from e
@@ -209,6 +212,9 @@ class ServoController:
 			raise RuntimeError("Serial port is not open")
 		
 		try:
+			# Clear input buffer to prevent buildup (Arduino doesn't send much data)
+			if self._ser.in_waiting > 0:
+				self._ser.reset_input_buffer()
 			self._ser.write(data)
 			self._ser.flush()
 		except SerialException as e:
@@ -298,7 +304,7 @@ if __name__ == "__main__":
 	# Example: [15, 20, 15] means servo 1 is horizontal at 15°, servo 2 at 20°, servo 3 at 15°
 	# Without flip: real_angle = neutral + commanded (e.g., neutral=0, command 5° → send 5°)
 	# With flip:    real_angle = neutral - commanded (e.g., neutral=15, command 5° → send 10°)
-	NEUTRAL_ANGLES = [20, 20, 20]
+	NEUTRAL_ANGLES = [128, 128, 128]
 	
 	# Flip servo direction: if True, servo angle is inverted around its neutral position
 	# Use this when servo rotation is backwards relative to the global reference frame
@@ -323,14 +329,14 @@ if __name__ == "__main__":
 		print(f"Could not list COM ports: {e}")
 	
 	print()
-	port = input("Enter COM port [default COM3]: ").strip() or "COM3"
+	port = input("Enter COM port [default COM8]: ").strip() or "COM8"
 	visualize = input("Enable visualization? (y/n) [default y]: ").strip().lower() != 'n'
 	print()
 	
 	# Create controller for interactive session
 	interactive = ServoController(port=port, visualize=visualize, 
 	                              flip_servo=FLIP_SERVOS, neutral_angles=NEUTRAL_ANGLES,
-	                              min_servo_angle=0.0, max_servo_angle=37.0)
+	                              min_servo_angle=85.0, max_servo_angle=144.0)
 	
 	# Display commanded angle limits
 	interactive.print_commanded_angle_limits()

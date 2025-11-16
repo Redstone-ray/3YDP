@@ -9,9 +9,9 @@ const int SERVO1_PORT = 0;
 const int SERVO2_PORT = 1;
 const int SERVO3_PORT = 2;
 
-const int MIN_ANGLE = 0;
-const int MAX_ANGLE = 300;  // 300° range of motion
-const int NEUTRAL_ANGLE = 150;  // Neutral at center of 300° range
+const int MIN_ANGLE = 76;   // Top most position
+const int MAX_ANGLE = 155;  // Bottom most position
+const int NEUTRAL_ANGLE = 128;  // Flat
 
 // Servo pulse length settings for 300° servo (500μS ~ 2500μS)
 // At 50Hz (20ms period), 4096 counts per period
@@ -41,12 +41,6 @@ void setup() {
   
   // Wait for oscillator to stabilize
   delay(10);
-  
-  // Move all servos to neutral position
-  uint16_t neutralPulse = angleToPulse(NEUTRAL_ANGLE);
-  pwm.setPWM(SERVO1_PORT, 0, neutralPulse);
-  pwm.setPWM(SERVO2_PORT, 0, neutralPulse);
-  pwm.setPWM(SERVO3_PORT, 0, neutralPulse);
   
   // Initialize variables
   targetAngles[0] = NEUTRAL_ANGLE;
