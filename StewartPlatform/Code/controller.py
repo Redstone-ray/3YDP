@@ -229,7 +229,9 @@ class BallBalancingController:
             'flip_servo': [True, True, True],
             'neutral_angles': [122, 126, 126],
             'min_servo_angle': 78,
-            'max_servo_angle': 155
+            'max_servo_angle': 155,
+            'led_rotation_offset': 55.0,
+            'led_reverse_direction': True
         }
         if servo_config:
             servo_defaults.update(servo_config)
@@ -238,12 +240,18 @@ class BallBalancingController:
         self.controller.print_commanded_angle_limits()
         
         # Initialize PID controllers (one for each axis)
-        self.pid_x = PIDController(kp=pid_kp, ki=pid_ki, kd=pid_kd, pf=pid_pf, output_limit=max_tilt, derivative_filter_coeff=0.8, max_kp_tilt=5.5)
-        self.pid_y = PIDController(kp=pid_kp, ki=pid_ki, kd=pid_kd, pf=pid_pf, output_limit=max_tilt, derivative_filter_coeff=0.8, max_kp_tilt=5.5)
+        self.pid_x = PIDController(kp=pid_kp, ki=pid_ki, kd=pid_kd, pf=pid_pf, output_limit=max_tilt, derivative_filter_coeff=0.1, max_kp_tilt=5.5)
+        self.pid_y = PIDController(kp=pid_kp, ki=pid_ki, kd=pid_kd, pf=pid_pf, output_limit=max_tilt, derivative_filter_coeff=0.1, max_kp_tilt=5.5)
         
         # State tracking
         self.running = False
         self.last_angles = None
+        
+        # LED update control (subsample to avoid slowing down control loop)
+        self.led_update_counter = 0
+        self.led_update_interval = 10  # Update LEDs every 10 control cycles
+        self.balanced_since = None  # Track when balanced state started
+        self.balanced_threshold_time = 1.0  # Seconds to wait before showing balanced
         
         # Visualization processes
         self.viz_processes = []
@@ -388,6 +396,9 @@ class BallBalancingController:
         print("Sensor Calibration")
         print("="*60)
         
+        # Set LEDs to calibration mode (red blinking)
+        self.controller.set_led_calibration()
+        
         # Connect to sensor
         if not self.sensor.connect():
             print("Failed to connect to sensor!")
@@ -456,11 +467,39 @@ class BallBalancingController:
                     sensor_read_count += 1
                     # 2. Get ball position
                     x, y = self.sensor.estimate_ball_position(data)
+                    weight_g = self.sensor.get_weight(data)
                     
-                    if x is not None and y is not None:
+                    if x is not None and y is not None and weight_g > 200:
                         # 3. Calculate errors (setpoint - measurement)
                         error_x = self.setpoint_x - x
                         error_y = self.setpoint_y - y
+                        
+                        # Apply deadband: if within 5mm of center, treat as zero error
+                        error_magnitude = np.sqrt(error_x**2 + error_y**2)
+                        if error_magnitude < 5.0:
+                            error_x = 0.0
+                            error_y = 0.0
+                        
+                        # Update LED state (subsampled to avoid performance impact)
+                        self.led_update_counter += 1
+                        if self.led_update_counter >= self.led_update_interval:
+                            self.led_update_counter = 0
+                            # Check if ball is balanced (within tolerance)
+                            error_magnitude = np.sqrt(error_x**2 + error_y**2)
+                            if error_magnitude < 15:  # Within 15mm = balanced
+                                # Track how long we've been balanced
+                                if self.balanced_since is None:
+                                    self.balanced_since = loop_start
+                                # Only show balanced if we've been balanced for threshold time
+                                if (loop_start - self.balanced_since) >= self.balanced_threshold_time:
+                                    self.controller.set_led_balanced()
+                                else:
+                                    # Still in transition, show ball position
+                                    self.controller.set_led_running(x, y)
+                            else:
+                                # Not balanced, reset timer and show ball position
+                                self.balanced_since = None
+                                self.controller.set_led_running(x, y)
                         
                         # 3.5. Estimate ball velocity for feedforward control
                         self.ball_position_history.append((x, y))
@@ -530,10 +569,22 @@ class BallBalancingController:
                                 print(f"\rIK Error: {e}                    ", end='', flush=True)
                     else:
                         # No valid position - hold current position or go to neutral
+                        # Set LEDs to idle mode (subsampled)
+                        self.led_update_counter += 1
+                        if self.led_update_counter >= self.led_update_interval:
+                            self.led_update_counter = 0
+                            self.controller.set_led_idle()
+                        
                         if verbose:
                             weight_g = self.sensor.get_weight(data)
                             print(f"\r[No position detected] Weight: {weight_g:5.1f}g                    ", 
                                   end='', flush=True)
+                else:
+                    # No data - set LEDs to idle (subsampled)
+                    self.led_update_counter += 1
+                    if self.led_update_counter >= self.led_update_interval:
+                        self.led_update_counter = 0
+                        self.controller.set_led_idle()
                 
                 # Frame timing
                 frame_count += 1
@@ -631,7 +682,7 @@ if __name__ == "__main__":
         setpoint_x=0.0,
         setpoint_y=0.0,
         pid_kp=0.055,      # Increased Kp for heavier ball
-        pid_ki=0.004,     # Small integral to handle steady-state error
+        pid_ki=0.003,     # Small integral to handle steady-state error
         pid_kd=0.03,      # Increased Kd for damping (counters inertia)
         pid_pf=0.0014,       # Feedforward gain for velocity compensation
         max_tilt=14.0,
