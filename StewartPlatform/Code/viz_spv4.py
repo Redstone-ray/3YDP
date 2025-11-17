@@ -29,6 +29,7 @@ def visualize_spv4(data_file='platform_state.dat'):
     
     # Set up matplotlib
     plt.ion()
+    plt.rcParams['figure.raise_window'] = False  # Don't steal focus on update
     
     print(f"SPV4 Visualization - Waiting for data file: {data_file}")
     

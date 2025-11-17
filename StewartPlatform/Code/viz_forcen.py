@@ -47,6 +47,7 @@ def visualize_forcen(data_file='ball_state.dat'):
     ax.legend()
     
     plt.ion()
+    plt.rcParams['figure.raise_window'] = False  # Don't steal focus on update
     plt.show()
     
     print(f"Waiting for data file: {data_file}")

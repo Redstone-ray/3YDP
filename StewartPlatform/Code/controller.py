@@ -6,7 +6,6 @@ Integrates ForcenInterface, SPV4 kinematics, and ServoController with PID contro
 import time
 import numpy as np
 import matplotlib.pyplot as plt
-import keyboard
 import subprocess
 import struct
 import os
@@ -14,6 +13,11 @@ import sys
 from ForcenInterface import ForcenInterface
 from SPV4 import StewartPlatform
 from ServoController import ServoController
+
+# Visualization script names
+VIZ_FORCEN_SCRIPT = 'viz_forcen.py'
+VIZ_SPV4_SCRIPT = 'viz_spv4.py'
+VIZ_TUNER_SCRIPT = 'viz_tuner.py'
 
 
 class PIDController:
@@ -147,6 +151,7 @@ class BallBalancingController:
                  max_tilt=20.0,
                  enable_spv4_viz=True,
                  enable_forcen_viz=True,
+                 enable_pid_tuner=True,
                  forcen_config=None,
                  servo_config=None):
         """
@@ -165,6 +170,7 @@ class BallBalancingController:
             max_tilt: Maximum tilt angle in degrees (default: 20.0)
             enable_spv4_viz: Enable SPV4 3D platform visualization (default: True)
             enable_forcen_viz: Enable Forcen ball position visualization (default: True)
+            enable_pid_tuner: Enable PID tuner GUI for real-time gain adjustment (default: True)
             forcen_config: Dict of ForcenInterface parameters (optional)
             servo_config: Dict of ServoController parameters (optional)
         """
@@ -173,6 +179,7 @@ class BallBalancingController:
         self.setpoint_y = setpoint_y
         self.enable_spv4_viz = enable_spv4_viz
         self.enable_forcen_viz = enable_forcen_viz
+        self.enable_pid_tuner = enable_pid_tuner
         
         # Configure matplotlib for non-blocking visualization
         if enable_spv4_viz or enable_forcen_viz:
@@ -233,11 +240,6 @@ class BallBalancingController:
         self.running = False
         self.last_angles = None
         
-        # Visualization setup (will be initialized in run())
-        self.fig = None
-        self.ball = None
-        self.coord_text = None
-        
         # Visualization processes
         self.viz_processes = []
         self.viz_data_file = 'ball_state.dat'
@@ -245,18 +247,126 @@ class BallBalancingController:
         self.platform_data_file = 'platform_state.dat'
         self.platform_data_format = '16d'  # 16 doubles: x1, x2, x3 (9), angles (6), timestamp
         
-        # PID tuning increments
-        self.kp_step = 0.005
-        self.ki_step = 0.001
-        self.kd_step = 0.005
-        self.pf_step = 0.01
-        self.gui = None
-        self.gui_thread = None
+        # PID tuner (only if enabled)
+        if enable_pid_tuner:
+            self.pid_gains_file = 'pid_gains.dat'
+            self.pid_gains_format = '8d'  # 8 doubles: kp_x, ki_x, kd_x, pf_x, kp_y, ki_y, kd_y, pf_y
+            self.last_gains_read_time = 0
+        else:
+            self.pid_gains_file = None
+            self.last_gains_read_time = None
         
         # Ball tracking for velocity estimation
         self.ball_position_history = []
         self.ball_time_history = []
         self.max_history = 5  # Keep last 5 samples for velocity estimation
+        
+        # Launch visualization processes (this will also write initial gains if tuner enabled)
+        self._launch_visualization_processes()
+    
+    def _launch_visualization_processes(self):
+        """Launch visualization and tuner processes."""
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        python_exe = sys.executable
+        
+        # Launch visualizations if enabled
+        viz_scripts = []
+        if self.enable_forcen_viz:
+            viz_scripts.append(VIZ_FORCEN_SCRIPT)
+        if self.enable_spv4_viz:
+            viz_scripts.append(VIZ_SPV4_SCRIPT)
+        
+        for viz_script in viz_scripts:
+            viz_path = os.path.join(script_dir, viz_script)
+            if os.path.exists(viz_path):
+                print(f"Launching {viz_script}...")
+                proc = subprocess.Popen([python_exe, viz_path],
+                                       creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == 'win32' else 0)
+                self.viz_processes.append(proc)
+            else:
+                print(f"Warning: Visualization script not found: {viz_script}")
+        
+        # Launch PID tuner GUI (if enabled)
+        if self.enable_pid_tuner:
+            # Write initial gains before launching tuner
+            self._write_initial_gains()
+            
+            tuner_script = os.path.join(script_dir, VIZ_TUNER_SCRIPT)
+            if os.path.exists(tuner_script):
+                print(f"Launching {VIZ_TUNER_SCRIPT}...")
+                proc = subprocess.Popen([python_exe, tuner_script],
+                                       creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == 'win32' else 0)
+                self.viz_processes.append(proc)
+            else:
+                print(f"Warning: Tuner script not found: {tuner_script}")
+        
+        if self.viz_processes:
+            print(f"Launched {len(self.viz_processes)} visualization/tuner processes\n")
+    
+    def _read_pid_gains(self):
+        """Read PID gains from file if available (written by tuner GUI)."""
+        if not self.enable_pid_tuner:
+            return  # Skip if tuner is disabled
+        
+        try:
+            if os.path.exists(self.pid_gains_file):
+                # Check if file was modified
+                mtime = os.path.getmtime(self.pid_gains_file)
+                if mtime > self.last_gains_read_time:
+                    with open(self.pid_gains_file, 'rb') as f:
+                        data = f.read(struct.calcsize(self.pid_gains_format))
+                        if len(data) == struct.calcsize(self.pid_gains_format):
+                            gains = struct.unpack(self.pid_gains_format, data)
+                            kp_x, ki_x, kd_x, pf_x, kp_y, ki_y, kd_y, pf_y = gains
+                            
+                            # Update PID controllers
+                            self.pid_x.set_gains(kp=kp_x, ki=ki_x, kd=kd_x, pf=pf_x)
+                            self.pid_y.set_gains(kp=kp_y, ki=ki_y, kd=kd_y, pf=pf_y)
+                            
+                            print(f"\n[PID Updated] X: Kp={kp_x:.3f} Ki={ki_x:.3f} Kd={kd_x:.3f} Pf={pf_x:.3f} | Y: Kp={kp_y:.3f} Ki={ki_y:.3f} Kd={kd_y:.3f} Pf={pf_y:.3f}")
+                            
+                            self.last_gains_read_time = mtime
+        except Exception as e:
+            pass  # Don't let gains reading block control loop
+    
+    def _write_initial_gains(self):
+        """Write initial PID gains to file for tuner GUI."""
+        if not self.enable_pid_tuner:
+            return  # Skip if tuner is disabled
+        
+        try:
+            gains = (self.pid_x.kp, self.pid_x.ki, self.pid_x.kd, self.pid_x.pf,
+                    self.pid_y.kp, self.pid_y.ki, self.pid_y.kd, self.pid_y.pf)
+            gains_data = struct.pack(self.pid_gains_format, *gains)
+            with open(self.pid_gains_file, 'wb') as f:
+                f.write(gains_data)
+            self.last_gains_read_time = os.path.getmtime(self.pid_gains_file)
+        except Exception as e:
+            print(f"Warning: Could not write initial gains: {e}")
+    
+    def _write_visualization_data(self, x, y, weight_g, pitch, roll, error_x, error_y, ik, timestamp):
+        """Write data to visualization files."""
+        try:
+            # Write ball state for forcen visualization
+            ball_data = struct.pack(self.viz_data_format, 
+                                   x, y, weight_g, pitch, roll, error_x, error_y, timestamp)
+            with open(self.viz_data_file, 'wb') as f:
+                f.write(ball_data)
+            
+            # Write platform state for SPV4 visualization
+            if ik is not None:
+                x1, x2, x3 = ik['x1'], ik['x2'], ik['x3']
+                angles = [ik['theta_11'], ik['theta_21'], ik['theta_31'], 
+                         ik['theta_12'], ik['theta_22'], ik['theta_32']]
+                platform_data = struct.pack(self.platform_data_format,
+                                          x1[0], x1[1], x1[2],
+                                          x2[0], x2[1], x2[2],
+                                          x3[0], x3[1], x3[2],
+                                          *angles, timestamp)
+                with open(self.platform_data_file, 'wb') as f:
+                    f.write(platform_data)
+        except Exception as e:
+            pass  # Don't let viz writing block control loop
     
     def calibrate_sensor(self, taring_time=5, save_to_eeprom=False):
         """
@@ -297,98 +407,13 @@ class BallBalancingController:
         print("✓ Sensor ready\n")
         return True
     
-    def _handle_keyboard_input(self):
-        """
-        Handle keyboard input for PID tuning.
-        Returns True to continue running, False to stop.
-        """
-        # ESC to stop
-        if keyboard.is_pressed('esc'):
-            return False
-        
-        # Kp adjustment
-        if keyboard.is_pressed('q'):
-            self.pid_x.kp += self.kp_step
-            self.pid_y.kp += self.kp_step
-            print(f"\n[Kp↑] X: {self.pid_x.kp:.3f}, Y: {self.pid_y.kp:.3f}")
-            time.sleep(0.1)
-        elif keyboard.is_pressed('a'):
-            self.pid_x.kp = max(0, self.pid_x.kp - self.kp_step)
-            self.pid_y.kp = max(0, self.pid_y.kp - self.kp_step)
-            print(f"\n[Kp↓] X: {self.pid_x.kp:.3f}, Y: {self.pid_y.kp:.3f}")
-            time.sleep(0.1)
-        
-        # Ki adjustment
-        if keyboard.is_pressed('w'):
-            self.pid_x.ki += self.ki_step
-            self.pid_y.ki += self.ki_step
-            print(f"\n[Ki↑] X: {self.pid_x.ki:.3f}, Y: {self.pid_y.ki:.3f}")
-            time.sleep(0.1)
-        elif keyboard.is_pressed('s'):
-            self.pid_x.ki = max(0, self.pid_x.ki - self.ki_step)
-            self.pid_y.ki = max(0, self.pid_y.ki - self.ki_step)
-            print(f"\n[Ki↓] X: {self.pid_x.ki:.3f}, Y: {self.pid_y.ki:.3f}")
-            time.sleep(0.1)
-        
-        # Kd adjustment
-        if keyboard.is_pressed('e'):
-            self.pid_x.kd += self.kd_step
-            self.pid_y.kd += self.kd_step
-            print(f"\n[Kd↑] X: {self.pid_x.kd:.3f}, Y: {self.pid_y.kd:.3f}")
-            time.sleep(0.1)
-        elif keyboard.is_pressed('d'):
-            self.pid_x.kd = max(0, self.pid_x.kd - self.kd_step)
-            self.pid_y.kd = max(0, self.pid_y.kd - self.kd_step)
-            print(f"\n[Kd↓] X: {self.pid_x.kd:.3f}, Y: {self.pid_y.kd:.3f}")
-            time.sleep(0.1)
-        
-        # Pf (feedforward) adjustment
-        if keyboard.is_pressed('t'):
-            self.pid_x.pf += self.pf_step
-            self.pid_y.pf += self.pf_step
-            print(f"\n[Pf↑] X: {self.pid_x.pf:.3f}, Y: {self.pid_y.pf:.3f}")
-            time.sleep(0.1)
-        elif keyboard.is_pressed('g'):
-            self.pid_x.pf = max(0, self.pid_x.pf - self.pf_step)
-            self.pid_y.pf = max(0, self.pid_y.pf - self.pf_step)
-            print(f"\n[Pf↓] X: {self.pid_x.pf:.3f}, Y: {self.pid_y.pf:.3f}")
-            time.sleep(0.1)
-        
-        # Reset integral and velocity history
-        if keyboard.is_pressed('r'):
-            self.pid_x.reset()
-            self.pid_y.reset()
-            self.ball_position_history.clear()
-            self.ball_time_history.clear()
-            print(f"\n[Reset] Integral terms & velocity history cleared")
-            time.sleep(0.3)
-        
-        # Print PID values
-        if keyboard.is_pressed('p'):
-            print(f"\n{'='*50}")
-            print(f"X-PID: Kp={self.pid_x.kp:.3f} Ki={self.pid_x.ki:.3f} Kd={self.pid_x.kd:.3f} Pf={self.pid_x.pf:.3f}")
-            print(f"Y-PID: Kp={self.pid_y.kp:.3f} Ki={self.pid_y.ki:.3f} Kd={self.pid_y.kd:.3f} Pf={self.pid_y.pf:.3f}")
-            print(f"{'='*50}\n")
-            time.sleep(0.3)
-        
-        return True
-    
     def run(self, update_rate=0.05, verbose=True):
         """
-        Main control loop with keyboard-based PID tuning.
+        Main control loop.
         
         Args:
             update_rate: Control loop update period in seconds (default: 0.05 = 20 Hz)
             verbose: Print debug information (default: True)
-        
-        Keyboard Controls:
-            Q/A: Increase/Decrease Kp for both axes
-            W/S: Increase/Decrease Ki for both axes
-            E/D: Increase/Decrease Kd for both axes
-            T/G: Increase/Decrease Pf (feedforward) for both axes
-            R: Reset integral terms
-            P: Print current PID values
-            ESC: Stop controller
         """
         print("="*60)
         print("Starting Ball Balancing Control Loop")
@@ -398,37 +423,7 @@ class BallBalancingController:
         print(f"Update Rate: {1/update_rate:.1f} Hz")
         print(f"SPV4 Visualization: {'Enabled' if self.enable_spv4_viz else 'Disabled'}")
         print(f"Forcen Visualization: {'Enabled' if self.enable_forcen_viz else 'Disabled'}")
-        print("\nKeyboard Controls:")
-        print("  Q/A: Kp +/-    W/S: Ki +/-    E/D: Kd +/-    T/G: Pf +/-")
-        print("  R: Reset Integral    P: Print PID    ESC: Stop")
-        print("\nNote: High-inertia ball - using velocity feedforward & filtered derivative")
-        print("Press Ctrl+C or ESC to stop\n")
-        
-        # Launch visualization processes if enabled
-        python_exe = sys.executable
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        if self.enable_forcen_viz:
-            viz_script = os.path.join(script_dir, 'viz_forcen.py')
-            if os.path.exists(viz_script):
-                print("Launching Forcen visualization process...")
-                proc = subprocess.Popen([python_exe, viz_script, self.viz_data_file],
-                                       creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == 'win32' else 0)
-                self.viz_processes.append(proc)
-            else:
-                print(f"Warning: Visualization script not found: {viz_script}")
-        
-        if self.enable_spv4_viz:
-            viz_script = os.path.join(script_dir, 'viz_spv4.py')
-            if os.path.exists(viz_script):
-                print("Launching SPV4 visualization process...")
-                proc = subprocess.Popen([python_exe, viz_script, self.platform_data_file],
-                                       creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == 'win32' else 0)
-                self.viz_processes.append(proc)
-            else:
-                print(f"Warning: Visualization script not found: {viz_script}")
-        
-        time.sleep(0.5)  # Give visualization processes time to start
+        print("\nPress Ctrl+C to stop\n")
         
         self.running = True
         frame_count = 0
@@ -445,9 +440,9 @@ class BallBalancingController:
             while self.running:
                 loop_start = time.time()
                 
-                # Handle keyboard input for PID tuning
-                if not self._handle_keyboard_input():
-                    break
+                # Read PID gains from tuner GUI (every 10 frames for ~10Hz update, if enabled)
+                if self.enable_pid_tuner and frame_count % 10 == 0:
+                    self._read_pid_gains()
                 
                 # 1. Read sensor data
                 data = self.sensor.read_data()
@@ -507,38 +502,12 @@ class BallBalancingController:
                                 self.controller.send_angles(angles)
                                 self.last_angles = angles
                             
-                            # 8. Write visualization data to files (every 10th frame for ~10Hz viz)
+                            # 8. Write visualization data (every 10th frame for ~10Hz viz)
                             if self.viz_processes and frame_count % 10 == 0:
                                 weight_g = self.sensor.get_weight(data)
-                                
-                                # Write ball state for Forcen viz
-                                if self.enable_forcen_viz:
-                                    viz_data = struct.pack(self.viz_data_format,
-                                                          x, y, weight_g,
-                                                          pitch_correction, roll_correction,
-                                                          error_x, error_y,
-                                                          loop_start)
-                                    try:
-                                        with open(self.viz_data_file, 'wb') as f:
-                                            f.write(viz_data)
-                                    except:
-                                        pass  # Don't let viz writing block control loop
-                                
-                                # Write platform state for SPV4 viz
-                                if self.enable_spv4_viz:
-                                    platform_data = struct.pack(self.platform_data_format,
-                                                               ik['x1'][0], ik['x1'][1], ik['x1'][2],
-                                                               ik['x2'][0], ik['x2'][1], ik['x2'][2],
-                                                               ik['x3'][0], ik['x3'][1], ik['x3'][2],
-                                                               ik['theta_11'], ik['theta_12'],
-                                                               ik['theta_21'], ik['theta_22'],
-                                                               ik['theta_31'], ik['theta_32'],
-                                                               loop_start)
-                                    try:
-                                        with open(self.platform_data_file, 'wb') as f:
-                                            f.write(platform_data)
-                                    except:
-                                        pass  # Don't let viz writing block control loop
+                                self._write_visualization_data(x, y, weight_g, pitch_correction, 
+                                                              roll_correction, error_x, error_y, 
+                                                              ik, loop_start)
                             
                             # Print status
                             if verbose:
@@ -611,6 +580,8 @@ class BallBalancingController:
                 os.remove(self.viz_data_file)
             if os.path.exists(self.platform_data_file):
                 os.remove(self.platform_data_file)
+            if self.enable_pid_tuner and self.pid_gains_file and os.path.exists(self.pid_gains_file):
+                os.remove(self.pid_gains_file)
         except:
             pass
         
@@ -660,7 +631,8 @@ if __name__ == "__main__":
         pid_pf=0.0,       # Feedforward gain for velocity compensation
         max_tilt=14.0,
         enable_spv4_viz=True,    # SPV4 viz (separate process)
-        enable_forcen_viz=True   # Forcen viz (separate process)
+        enable_forcen_viz=True,  # Forcen viz (separate process)
+        enable_pid_tuner=True    # PID tuner GUI (separate process)
     ) as controller:
         
         # Move platform to home position before calibration
