@@ -90,57 +90,72 @@ void loop() {
     
     // Check if this is an LED command
     if (firstByte == LED_COMMAND_BYTE) {
-      // Wait for mode byte
-      while (Serial.available() < 1) {
+      // Wait for mode byte with timeout
+      unsigned long startWait = millis();
+      while (Serial.available() < 1 && (millis() - startWait) < 100) {
         delayMicroseconds(100);
       }
-      uint8_t mode = Serial.read();
       
-      // Process LED command based on mode
-      if (mode == LED_MODE_IDLE) {
-        ledMode = LED_MODE_IDLE;
-      } else if (mode == LED_MODE_CALIBRATING) {
-        ledMode = LED_MODE_CALIBRATING;
-      } else if (mode == LED_MODE_RUNNING_BALANCED) {
-        ledMode = LED_MODE_RUNNING_BALANCED;
-      } else if (mode == LED_MODE_RUNNING_BALL) {
-        // Wait for ball position byte
-        while (Serial.available() < 1) {
-          delayMicroseconds(100);
+      if (Serial.available() >= 1) {
+        uint8_t mode = Serial.read();
+        
+        // Process LED command based on mode
+        if (mode == LED_MODE_IDLE) {
+          ledMode = LED_MODE_IDLE;
+        } else if (mode == LED_MODE_CALIBRATING) {
+          ledMode = LED_MODE_CALIBRATING;
+        } else if (mode == LED_MODE_RUNNING_BALANCED) {
+          ledMode = LED_MODE_RUNNING_BALANCED;
+        } else if (mode == LED_MODE_RUNNING_BALL) {
+          // Wait for ball position byte with timeout
+          startWait = millis();
+          while (Serial.available() < 1 && (millis() - startWait) < 100) {
+            delayMicroseconds(100);
+          }
+          if (Serial.available() >= 1) {
+            ledBallPosition = Serial.read();
+            ledMode = LED_MODE_RUNNING_BALL;
+          }
         }
-        ledBallPosition = Serial.read();
-        ledMode = LED_MODE_RUNNING_BALL;
       }
     } 
     // Otherwise, this is a servo command (expect 2 more bytes)
-    else if (Serial.available() >= 2) {
-      int angle0 = firstByte;  // First byte for port 0
-      int angle1 = Serial.read();  // Second byte for port 1
-      int angle2 = Serial.read();  // Third byte for port 2
-      
-      // Validate angle ranges and update targets
-      bool validCommand = true;
-      
-      if (angle0 >= MIN_ANGLE && angle0 <= MAX_ANGLE) {
-        targetAngles[0] = angle0;
-      } else {
-        validCommand = false;
+    else if (firstByte >= MIN_ANGLE && firstByte <= MAX_ANGLE) {
+      // Wait for remaining 2 bytes with timeout
+      unsigned long startWait = millis();
+      while (Serial.available() < 2 && (millis() - startWait) < 100) {
+        delayMicroseconds(100);
       }
       
-      if (angle1 >= MIN_ANGLE && angle1 <= MAX_ANGLE) {
-        targetAngles[1] = angle1;
-      } else {
-        validCommand = false;
-      }
-      
-      if (angle2 >= MIN_ANGLE && angle2 <= MAX_ANGLE) {
-        targetAngles[2] = angle2;
-      } else {
-        validCommand = false;
-      }
-      
-      if (validCommand) {
-        newCommand = true;
+      if (Serial.available() >= 2) {
+        int angle0 = firstByte;  // First byte for port 0
+        int angle1 = Serial.read();  // Second byte for port 1
+        int angle2 = Serial.read();  // Third byte for port 2
+        
+        // Validate angle ranges and update targets
+        bool validCommand = true;
+        
+        if (angle0 >= MIN_ANGLE && angle0 <= MAX_ANGLE) {
+          targetAngles[0] = angle0;
+        } else {
+          validCommand = false;
+        }
+        
+        if (angle1 >= MIN_ANGLE && angle1 <= MAX_ANGLE) {
+          targetAngles[1] = angle1;
+        } else {
+          validCommand = false;
+        }
+        
+        if (angle2 >= MIN_ANGLE && angle2 <= MAX_ANGLE) {
+          targetAngles[2] = angle2;
+        } else {
+          validCommand = false;
+        }
+        
+        if (validCommand) {
+          newCommand = true;
+        }
       }
     }
   }
