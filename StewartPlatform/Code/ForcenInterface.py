@@ -34,7 +34,7 @@ class ForcenInterface:
                  arm_cog_x=0.0, arm_cog_y=0.0, arm_cog_z=0.0, 
                  arm_weight=0.0, arm_length_z=0.0, arm_weight_confidence=0.0,
                  rotation_angle=0.0, scale_x=1.0, scale_y=1.0, flip_x=False, flip_y=False,
-                 platform_radius=150.0, fz_min=4500.0, fz_max=7500.0):
+                 platform_radius=150.0, fz_min=4500.0, fz_max=7500.0, filter_alpha=0.8):
         """
         Initialize the Forcen Interface.
         
@@ -75,6 +75,9 @@ class ForcenInterface:
             Minimum acceptable Fz in mN - readings below this are filtered (default: 4500.0)
         fz_max : float
             Maximum acceptable Fz in mN - readings above this are filtered (default: 7500.0)
+        filter_alpha : float
+            Low-pass filter smoothing factor, 0-1 (default: 0.8)
+            Lower values = more smoothing, higher values = more responsive
         """
         self.com_port = com_port
         self.baud_rate = baud_rate
@@ -98,6 +101,11 @@ class ForcenInterface:
         self.platform_radius = platform_radius  # Platform radius in mm
         self.fz_min = fz_min  # mN - minimum acceptable Fz
         self.fz_max = fz_max  # mN - maximum acceptable Fz
+        
+        # Low-pass filter for position smoothing
+        self.filtered_x = None
+        self.filtered_y = None
+        self.filter_alpha = filter_alpha  # Smoothing factor (0 = no change, 1 = no smoothing)
         
         # Print transformation parameters for debugging
         if rotation_angle != 0.0 or scale_x != 1.0 or scale_y != 1.0 or flip_x or flip_y:
@@ -642,10 +650,14 @@ class ForcenInterface:
     
     def _estimate_ball_position_filtered(self, data):
         """
-        Filtered position estimation that rejects readings during platform acceleration.
+        Filtered position estimation that rejects readings during platform acceleration
+        and applies low-pass filtering for smooth position tracking.
+        
         Filters out readings that are:
         1. Outside the platform boundary (150mm radius)
         2. Fz outside acceptable force band (indicates acceleration)
+        
+        Then applies exponential moving average filter for smoothing.
         
         Parameters:
         -----------
@@ -654,7 +666,8 @@ class ForcenInterface:
         
         Returns:
         --------
-        tuple : (x, y) filtered position in mm (raw, no transformations), or last valid position if current reading is invalid
+        tuple : (x, y) filtered and smoothed position in mm (raw, no transformations), 
+                or last valid position if current reading is invalid
         """
         # Get raw position
         x_raw, y_raw = self._estimate_ball_position_raw(data)
@@ -686,10 +699,21 @@ class ForcenInterface:
                 print(f"[FILTER] Fz outside band: {current_fz:.1f} mN")
             return self.last_valid_position
         
-        # Reading passed all filters - update last valid position
-        self.last_valid_position = (x_raw, y_raw)
+        # Apply low-pass filter for smoothing (before updating last_valid_position)
+        # Exponential moving average: y[n] = α * x[n] + (1 - α) * y[n-1]
+        if self.filtered_x is None or self.filtered_y is None:
+            # Initialize filter
+            self.filtered_x = x_raw
+            self.filtered_y = y_raw
+        else:
+            # Apply exponential moving average
+            self.filtered_x = self.filter_alpha * x_raw + (1 - self.filter_alpha) * self.filtered_x
+            self.filtered_y = self.filter_alpha * y_raw + (1 - self.filter_alpha) * self.filtered_y
         
-        return (x_raw, y_raw)
+        # Update last valid position with filtered values
+        self.last_valid_position = (self.filtered_x, self.filtered_y)
+        
+        return (self.filtered_x, self.filtered_y)
     
     def estimate_ball_position(self, data):
         """
@@ -700,7 +724,7 @@ class ForcenInterface:
         Moment = Force × Distance, so Distance = Moment / Force
         
         Transformation order:
-        1. Calculate raw position from sensor data
+        1. Calculate raw position from sensor data (with filtering and smoothing)
         2. Apply center offset correction (in raw sensor frame)
         3. Apply radial scale factors (still in sensor frame)
         4. Apply coordinate frame rotation (to align with real-world frame)
@@ -714,7 +738,7 @@ class ForcenInterface:
         --------
         tuple : (x, y) position in mm with all transformations applied, or (None, None) if cannot calculate
         """
-        # Use filtered position instead of raw position
+        # Use filtered position (already includes low-pass filtering)
         x_raw, y_raw = self._estimate_ball_position_filtered(data)
         
         if x_raw is None or y_raw is None:
@@ -820,6 +844,10 @@ if __name__ == "__main__":
         scale_y=1.1,         # Y-axis radial scale factor
         flip_x=False,        # Flip X-axis after rotation
         flip_y=True,         # Flip Y-axis after rotation
+        platform_radius=150.0,
+        fz_min=4000.0,
+        fz_max=8000.0,
+        filter_alpha=0.8        # Low-pass filter smoothing factor (0-1, 1 is no smoothing)
     )
     
     # Using context manager
@@ -830,9 +858,9 @@ if __name__ == "__main__":
             exit(1)
         
         # # Step 2: Run calibration (auto-save to EEPROM)
-        # if not sensor.calibrate(taring_time=5, save_to_eeprom=False):
-        #     print("Calibration failed!")
-        #     exit(1)
+        if not sensor.calibrate(taring_time=5, save_to_eeprom=False):
+            print("Calibration failed!")
+            exit(1)
         
         # Step 3: Start data streaming
         print("\nStarting data stream...")
