@@ -28,6 +28,10 @@ def visualize_forcen(data_file='ball_state.dat'):
     ax.axhline(y=0, color='k', linewidth=0.5)
     ax.axvline(x=0, color='k', linewidth=0.5)
     
+    # Draw platform boundary (150mm radius)
+    platform = Circle((0, 0), 150, fill=False, edgecolor='black', linewidth=2, label='Platform')
+    ax.add_patch(platform)
+    
     # Draw setpoint
     setpoint = Circle((0, 0), 5, color='red', alpha=0.5, label='Setpoint')
     ax.add_patch(setpoint)

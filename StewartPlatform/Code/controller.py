@@ -24,7 +24,7 @@ class PIDController:
     """PID controller with derivative filtering and feedforward for high-inertia systems."""
     
     def __init__(self, kp=0.1, ki=0.0, kd=0.05, pf=0.3, output_limit=20.0, 
-                 derivative_filter_coeff=0.1, use_velocity_feedforward=True):
+                 derivative_filter_coeff=0.1, use_velocity_feedforward=True, max_kp_tilt=5.5):
         """
         Initialize PID controller.
         
@@ -50,6 +50,7 @@ class PIDController:
         self.last_time = None
         self.filtered_derivative = 0.0
         self.last_position = None
+        self.max_kp_tilt = max_kp_tilt
     
     def update(self, error, current_time=None, current_position=None, velocity_estimate=None):
         """
@@ -80,7 +81,7 @@ class PIDController:
             return 0.0  # Avoid division by zero
         
         # Proportional term
-        p_term = self.kp * error
+        p_term = min(self.kp * error, self.max_kp_tilt)
         
         # Integral term (with anti-windup: only accumulate if not saturated)
         if abs(self.integral * self.ki) < self.output_limit * 0.8:  # 80% threshold
@@ -206,6 +207,10 @@ class BallBalancingController:
             'scale_y': 1.1,
             'flip_x': False,
             'flip_y': True,
+            'platform_radius': 150.0,
+            'fz_min': 4000.0,
+            'fz_max': 8000.0,
+            'filter_alpha': 0.9
         }
         if forcen_config:
             forcen_defaults.update(forcen_config)
@@ -233,8 +238,8 @@ class BallBalancingController:
         self.controller.print_commanded_angle_limits()
         
         # Initialize PID controllers (one for each axis)
-        self.pid_x = PIDController(kp=pid_kp, ki=pid_ki, kd=pid_kd, pf=pid_pf, output_limit=max_tilt)
-        self.pid_y = PIDController(kp=pid_kp, ki=pid_ki, kd=pid_kd, pf=pid_pf, output_limit=max_tilt)
+        self.pid_x = PIDController(kp=pid_kp, ki=pid_ki, kd=pid_kd, pf=pid_pf, output_limit=max_tilt, derivative_filter_coeff=0.8, max_kp_tilt=5.5)
+        self.pid_y = PIDController(kp=pid_kp, ki=pid_ki, kd=pid_kd, pf=pid_pf, output_limit=max_tilt, derivative_filter_coeff=0.8, max_kp_tilt=5.5)
         
         # State tracking
         self.running = False
@@ -259,7 +264,7 @@ class BallBalancingController:
         # Ball tracking for velocity estimation
         self.ball_position_history = []
         self.ball_time_history = []
-        self.max_history = 5  # Keep last 5 samples for velocity estimation
+        self.max_history = 10  # Keep last 10 samples for velocity estimation
         
         # Launch visualization processes (this will also write initial gains if tuner enabled)
         self._launch_visualization_processes()
@@ -440,8 +445,8 @@ class BallBalancingController:
             while self.running:
                 loop_start = time.time()
                 
-                # Read PID gains from tuner GUI (every 10 frames for ~10Hz update, if enabled)
-                if self.enable_pid_tuner and frame_count % 10 == 0:
+                # Read PID gains from tuner GUI (every 100 frames for ~100Hz update, if enabled)
+                if self.enable_pid_tuner and frame_count % 100 == 0:
                     self._read_pid_gains()
                 
                 # 1. Read sensor data
@@ -453,8 +458,8 @@ class BallBalancingController:
                     x, y = self.sensor.estimate_ball_position(data)
                     
                     if x is not None and y is not None:
-                        # 3. Calculate errors
-                        error_x = -self.setpoint_x - x
+                        # 3. Calculate errors (setpoint - measurement)
+                        error_x = self.setpoint_x - x
                         error_y = self.setpoint_y - y
                         
                         # 3.5. Estimate ball velocity for feedforward control
@@ -468,7 +473,7 @@ class BallBalancingController:
                         
                         # Calculate velocity using linear regression for better noise rejection
                         vel_x, vel_y = 0.0, 0.0
-                        if len(self.ball_position_history) >= 3:
+                        if len(self.ball_position_history) >= self.max_history:
                             times = np.array(self.ball_time_history)
                             times = times - times[0]  # Normalize to start at 0
                             x_positions = np.array([pos[0] for pos in self.ball_position_history])
@@ -626,9 +631,9 @@ if __name__ == "__main__":
         setpoint_x=0.0,
         setpoint_y=0.0,
         pid_kp=0.055,      # Increased Kp for heavier ball
-        pid_ki=0.01,     # Small integral to handle steady-state error
+        pid_ki=0.004,     # Small integral to handle steady-state error
         pid_kd=0.03,      # Increased Kd for damping (counters inertia)
-        pid_pf=0.0,       # Feedforward gain for velocity compensation
+        pid_pf=0.0014,       # Feedforward gain for velocity compensation
         max_tilt=14.0,
         enable_spv4_viz=True,    # SPV4 viz (separate process)
         enable_forcen_viz=True,  # Forcen viz (separate process)
