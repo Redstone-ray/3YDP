@@ -261,6 +261,11 @@ class BallBalancingController:
         self.ball_time_history = []
         self.max_history = 5  # Keep last 5 samples for velocity estimation
         
+        # LED state tracking
+        self.led_update_counter = 0
+        self.led_update_interval = 10  # Update LEDs every 10th control cycle (1/10 rate)
+        self.current_led_state = 'idle'  # Track current LED state: 'idle', 'calibrating', 'balanced', 'ball'
+        
         # Launch visualization processes (this will also write initial gains if tuner enabled)
         self._launch_visualization_processes()
     
@@ -383,6 +388,9 @@ class BallBalancingController:
         print("Sensor Calibration")
         print("="*60)
         
+        # Set LEDs to calibration mode
+        self.controller.set_led_calibrating()
+        
         # Connect to sensor
         if not self.sensor.connect():
             print("Failed to connect to sensor!")
@@ -457,6 +465,20 @@ class BallBalancingController:
                         error_x = -self.setpoint_x - x
                         error_y = self.setpoint_y - y
                         
+                        # Check if ball is balanced (within tolerance)
+                        is_balanced = (abs(error_x) < 2.0 and abs(error_y) < 2.0)  # 2mm tolerance
+                        
+                        # Update LED state (throttled to 1/10 of control cycles)
+                        if frame_count % self.led_update_interval == 0:
+                            if is_balanced:
+                                if self.current_led_state != 'balanced':
+                                    self.controller.set_led_running_balanced()
+                                    self.current_led_state = 'balanced'
+                            else:
+                                # Send ball position to LEDs
+                                self.controller.set_led_running_ball(x, y)
+                                self.current_led_state = 'ball'
+                        
                         # 3.5. Estimate ball velocity for feedforward control
                         self.ball_position_history.append((x, y))
                         self.ball_time_history.append(loop_start)
@@ -525,6 +547,12 @@ class BallBalancingController:
                                 print(f"\rIK Error: {e}                    ", end='', flush=True)
                     else:
                         # No valid position - hold current position or go to neutral
+                        # Update LED state to idle (throttled)
+                        if frame_count % self.led_update_interval == 0:
+                            if self.current_led_state != 'idle':
+                                self.controller.set_led_idle()
+                                self.current_led_state = 'idle'
+                        
                         if verbose:
                             weight_g = self.sensor.get_weight(data)
                             print(f"\r[No position detected] Weight: {weight_g:5.1f}g                    ", 

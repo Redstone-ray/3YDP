@@ -100,7 +100,8 @@ class ServoController:
 	def __init__(self, port: str = "COM3", baudrate: int = 115200, timeout: float = 1.0, 
 	             visualize: bool = False, flip_servo: Optional[Iterable[bool]] = None,
 	             neutral_angles: Optional[Iterable[float]] = None,
-	             min_servo_angle: float = 0.0, max_servo_angle: float = 25.0):
+	             min_servo_angle: float = 0.0, max_servo_angle: float = 25.0,
+	             led_rotation_offset: float = 0.0):
 		"""Create a controller.
 
 		port: serial port name (e.g., 'COM3' on Windows)
@@ -118,6 +119,7 @@ class ServoController:
 		                  - Command 5° → sends [10, 5, 10] (servos 1&3: 15-5, servo 2: 0+5)
 		min_servo_angle: minimum REAL raw servo angle in degrees (default 0)
 		max_servo_angle: maximum REAL raw servo angle in degrees (default 25)
+		led_rotation_offset: rotation offset in degrees to align LED reference frame with global frame (default 0)
 		"""
 		flips = list(flip_servo) if flip_servo is not None else [False, False, False]
 		if len(flips) != 3:
@@ -131,6 +133,19 @@ class ServoController:
 		
 		self.min_servo_angle: float = float(min_servo_angle)
 		self.max_servo_angle: float = float(max_servo_angle)
+		
+		# LED configuration
+		self.led_rotation_offset: float = float(led_rotation_offset)
+		self.num_leds: int = 60
+		self.first_led_index: int = 3
+		self.active_leds: int = 57  # 60 - 3
+		
+		# LED command protocol constants
+		self.LED_COMMAND_BYTE: int = 250
+		self.LED_MODE_IDLE: int = 0
+		self.LED_MODE_CALIBRATING: int = 1
+		self.LED_MODE_RUNNING_BALANCED: int = 2
+		self.LED_MODE_RUNNING_BALL: int = 3
 		
 		self.port = port
 		self.baudrate = int(baudrate)
@@ -282,6 +297,64 @@ class ServoController:
 			min_cmd, max_cmd = self.get_commanded_angle_limits(i)
 			print(f"  Servo {i+1}: [{min_cmd:+.1f}°, {max_cmd:+.1f}°]")
 		print()
+	
+	def _send_led_command(self, mode: int, data: Optional[int] = None) -> None:
+		"""Send an LED command to the Arduino.
+		
+		Args:
+			mode: LED mode (IDLE, CALIBRATING, RUNNING_BALANCED, RUNNING_BALL)
+			data: Optional data byte (e.g., LED position for RUNNING_BALL mode)
+		"""
+		if self._ser is None:
+			return  # Silently fail if serial port is not open
+		
+		try:
+			# Build command: [LED_COMMAND_BYTE, mode, optional data]
+			if data is not None:
+				cmd = struct.pack("BBB", self.LED_COMMAND_BYTE, mode, data)
+			else:
+				cmd = struct.pack("BB", self.LED_COMMAND_BYTE, mode)
+			
+			self._ser.write(cmd)
+			self._ser.flush()
+		except SerialException:
+			# Don't let LED commands interfere with control loop
+			pass
+	
+	def set_led_idle(self) -> None:
+		"""Set LEDs to idle mode (blue circling animation)."""
+		self._send_led_command(self.LED_MODE_IDLE)
+	
+	def set_led_calibrating(self) -> None:
+		"""Set LEDs to calibration mode (blinking red every 4th LED)."""
+		self._send_led_command(self.LED_MODE_CALIBRATING)
+	
+	def set_led_running_balanced(self) -> None:
+		"""Set LEDs to running balanced mode (steady green every 4th LED)."""
+		self._send_led_command(self.LED_MODE_RUNNING_BALANCED)
+	
+	def set_led_running_ball(self, x: float, y: float) -> None:
+		"""Set LEDs to running ball mode (orange LED at ball position).
+		
+		Args:
+			x: Ball X position in mm (global reference frame)
+			y: Ball Y position in mm (global reference frame)
+		"""
+		# Convert ball position (x, y) to angle
+		angle_rad = np.arctan2(y, x)
+		angle_deg = angle_rad * 180.0 / np.pi
+		
+		# Apply rotation offset to convert from global to LED reference frame
+		angle_deg += self.led_rotation_offset
+		
+		# Normalize to 0-360 range
+		angle_deg = angle_deg % 360.0
+		
+		# Convert angle to LED index (0-56)
+		# 360 degrees / 57 LEDs = 6.316 degrees per LED
+		led_index = int(round((angle_deg / 360.0) * self.active_leds)) % self.active_leds
+		
+		self._send_led_command(self.LED_MODE_RUNNING_BALL, led_index)
 
 	def close(self) -> None:
 		"""Close the serial port if open."""
