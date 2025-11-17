@@ -33,7 +33,8 @@ class ForcenInterface:
     def __init__(self, com_port, baud_rate=115200, sample_rate=100, 
                  arm_cog_x=0.0, arm_cog_y=0.0, arm_cog_z=0.0, 
                  arm_weight=0.0, arm_length_z=0.0, arm_weight_confidence=0.0,
-                 rotation_angle=0.0, scale_x=1.0, scale_y=1.0, flip_x=False, flip_y=False):
+                 rotation_angle=0.0, scale_x=1.0, scale_y=1.0, flip_x=False, flip_y=False,
+                 platform_radius=150.0, fz_min=4500.0, fz_max=7500.0):
         """
         Initialize the Forcen Interface.
         
@@ -68,6 +69,12 @@ class ForcenInterface:
             Flip X-axis after rotation (default: False)
         flip_y : bool
             Flip Y-axis after rotation (default: False)
+        platform_radius : float
+            Platform radius in mm for boundary detection (default: 150.0)
+        fz_min : float
+            Minimum acceptable Fz in mN - readings below this are filtered (default: 4500.0)
+        fz_max : float
+            Maximum acceptable Fz in mN - readings above this are filtered (default: 7500.0)
         """
         self.com_port = com_port
         self.baud_rate = baud_rate
@@ -85,6 +92,12 @@ class ForcenInterface:
         self.scale_y = scale_y  # Radial scale factor for Y
         self.flip_x = flip_x  # Flip X after rotation
         self.flip_y = flip_y  # Flip Y after rotation
+        
+        # Filtering parameters for platform acceleration detection
+        self.last_valid_position = (None, None)  # Track last valid position
+        self.platform_radius = platform_radius  # Platform radius in mm
+        self.fz_min = fz_min  # mN - minimum acceptable Fz
+        self.fz_max = fz_max  # mN - maximum acceptable Fz
         
         # Print transformation parameters for debugging
         if rotation_angle != 0.0 or scale_x != 1.0 or scale_y != 1.0 or flip_x or flip_y:
@@ -609,6 +622,7 @@ class ForcenInterface:
         Mx = data['Mx']  # Moment around X-axis (Nmm)
         My = data['My']  # Moment around Y-axis (Nmm)
         Fz = data['Fz']  # Force in Z (mN)
+        weight_grams = data['Weight']
         
         # Avoid division by zero
         if abs(Fz) < 10:  # Less than 10 mN is too small
@@ -616,6 +630,7 @@ class ForcenInterface:
         
         # Convert Fz from mN to N
         Fz_N = Fz / 1000.0
+        # Fz_N = (weight_grams / 1000.0) * 9.80665
         
         # Calculate position in mm
         # Moment around X is caused by Y position: Mx = Fz * y
@@ -624,6 +639,57 @@ class ForcenInterface:
         x = My / Fz_N  # mm
         
         return (x, y)
+    
+    def _estimate_ball_position_filtered(self, data):
+        """
+        Filtered position estimation that rejects readings during platform acceleration.
+        Filters out readings that are:
+        1. Outside the platform boundary (150mm radius)
+        2. Fz outside acceptable force band (indicates acceleration)
+        
+        Parameters:
+        -----------
+        data : dict
+            Sensor data containing 'Mx', 'My', and 'Fz'
+        
+        Returns:
+        --------
+        tuple : (x, y) filtered position in mm (raw, no transformations), or last valid position if current reading is invalid
+        """
+        # Get raw position
+        x_raw, y_raw = self._estimate_ball_position_raw(data)
+        
+        if x_raw is None or y_raw is None:
+            return self.last_valid_position
+        
+        # Get current Fz value
+        current_fz = data.get('Fz')
+        if current_fz is None:
+            return self.last_valid_position
+        
+        # Debug: Print Fz value for tuning force band
+        if __name__ == "__main__":
+            print(f"[DEBUG] Fz: {current_fz:.1f} mN (band: {self.fz_min:.1f} - {self.fz_max:.1f})")
+        
+        # Filter 1: Check if position is outside platform boundary
+        distance_from_center = (x_raw**2 + y_raw**2)**0.5
+        if distance_from_center > self.platform_radius:
+            # Position outside platform - likely acceleration, use last valid position
+            if __name__ == "__main__":
+                print(f"[FILTER] Position outside bounds: {distance_from_center:.1f}mm > {self.platform_radius}mm")
+            return self.last_valid_position
+        
+        # Filter 2: Check if Fz is within acceptable band
+        if current_fz < self.fz_min or current_fz > self.fz_max:
+            # Force outside acceptable band - likely acceleration, use last valid position
+            if __name__ == "__main__":
+                print(f"[FILTER] Fz outside band: {current_fz:.1f} mN")
+            return self.last_valid_position
+        
+        # Reading passed all filters - update last valid position
+        self.last_valid_position = (x_raw, y_raw)
+        
+        return (x_raw, y_raw)
     
     def estimate_ball_position(self, data):
         """
@@ -648,7 +714,8 @@ class ForcenInterface:
         --------
         tuple : (x, y) position in mm with all transformations applied, or (None, None) if cannot calculate
         """
-        x_raw, y_raw = self._estimate_ball_position_raw(data)
+        # Use filtered position instead of raw position
+        x_raw, y_raw = self._estimate_ball_position_filtered(data)
         
         if x_raw is None or y_raw is None:
             return (None, None)
@@ -762,10 +829,10 @@ if __name__ == "__main__":
             print("Initialization failed!")
             exit(1)
         
-        # Step 2: Run calibration (auto-save to EEPROM)
-        if not sensor.calibrate(taring_time=5, save_to_eeprom=False):
-            print("Calibration failed!")
-            exit(1)
+        # # Step 2: Run calibration (auto-save to EEPROM)
+        # if not sensor.calibrate(taring_time=5, save_to_eeprom=False):
+        #     print("Calibration failed!")
+        #     exit(1)
         
         # Step 3: Start data streaming
         print("\nStarting data stream...")
