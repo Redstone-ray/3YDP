@@ -22,9 +22,9 @@ class PIDTunerGUI:
         # Create main window
         self.root = tk.Tk()
         self.root.title("PID Tuner")
-        self.root.geometry("400x500")
+        self.root.geometry("400x300")
         
-        # Default PID values
+        # Default PID values (X and Y always match)
         self.gains = {
             'kp_x': 0.055,
             'ki_x': 0.01,
@@ -63,34 +63,18 @@ class PIDTunerGUI:
         title.pack(pady=10)
         
         # Info label
-        info = tk.Label(self.root, text="Adjust PID gains in real-time", font=("Arial", 10))
+        info = tk.Label(self.root, text="Adjust PID gains (applies to both X and Y axes)", font=("Arial", 10))
         info.pack()
         
         # Frame for controls
         control_frame = ttk.Frame(self.root, padding="10")
         control_frame.pack(fill=tk.BOTH, expand=True)
         
-        # X-axis section
-        x_label = tk.Label(control_frame, text="X-Axis (Roll)", font=("Arial", 12, "bold"))
-        x_label.grid(row=0, column=0, columnspan=3, pady=5, sticky=tk.W)
-        
-        self._create_slider(control_frame, "Kp", 'kp_x', 0.0, 0.2, 0.001, row=1)
-        self._create_slider(control_frame, "Ki", 'ki_x', 0.0, 0.05, 0.001, row=2)
-        self._create_slider(control_frame, "Kd", 'kd_x', 0.0, 0.1, 0.001, row=3)
-        self._create_slider(control_frame, "Pf", 'pf_x', 0.0, 0.5, 0.01, row=4)
-        
-        # Separator
-        sep = ttk.Separator(control_frame, orient='horizontal')
-        sep.grid(row=5, column=0, columnspan=3, sticky='ew', pady=10)
-        
-        # Y-axis section
-        y_label = tk.Label(control_frame, text="Y-Axis (Pitch)", font=("Arial", 12, "bold"))
-        y_label.grid(row=6, column=0, columnspan=3, pady=5, sticky=tk.W)
-        
-        self._create_slider(control_frame, "Kp", 'kp_y', 0.0, 0.2, 0.001, row=7)
-        self._create_slider(control_frame, "Ki", 'ki_y', 0.0, 0.05, 0.001, row=8)
-        self._create_slider(control_frame, "Kd", 'kd_y', 0.0, 0.1, 0.001, row=9)
-        self._create_slider(control_frame, "Pf", 'pf_y', 0.0, 0.5, 0.01, row=10)
+        # PID controls (single set for both axes)
+        self._create_slider(control_frame, "Kp", 'kp_x', 0.0, 0.2, 0.001, row=0)
+        self._create_slider(control_frame, "Ki", 'ki_x', 0.0, 0.2, 0.001, row=1)
+        self._create_slider(control_frame, "Kd", 'kd_x', 0.0, 0.2, 0.001, row=2)
+        self._create_slider(control_frame, "Pf", 'pf_x', 0.0, 0.01, 0.0001, row=3)
         
         # Buttons frame
         button_frame = ttk.Frame(self.root, padding="10")
@@ -100,11 +84,6 @@ class PIDTunerGUI:
         reset_btn = tk.Button(button_frame, text="Reset to Defaults", command=self._reset_gains,
                              bg="#ff6b6b", fg="white", font=("Arial", 10, "bold"))
         reset_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Copy X to Y button
-        copy_btn = tk.Button(button_frame, text="Copy X → Y", command=self._copy_x_to_y,
-                           bg="#4ecdc4", fg="white", font=("Arial", 10, "bold"))
-        copy_btn.pack(side=tk.LEFT, padx=5)
         
         # Status label
         self.status_label = tk.Label(self.root, text=f"Writing to: {self.data_file}", 
@@ -132,9 +111,9 @@ class PIDTunerGUI:
         lbl.grid(row=row, column=0, sticky=tk.W, padx=5, pady=2)
         
         # Value display
-        value_var = tk.StringVar(value=f"{self.gains[key]:.3f}")
+        value_var = tk.StringVar(value=f"{self.gains[key]:.5f}")
         value_label = tk.Label(parent, textvariable=value_var, font=("Arial", 10, "bold"),
-                              width=6, anchor=tk.E)
+                              width=8, anchor=tk.E)
         value_label.grid(row=row, column=2, padx=5)
         
         # Slider
@@ -151,9 +130,15 @@ class PIDTunerGUI:
         return slider
     
     def _on_slider_change(self, key, value, value_var):
-        """Handle slider value change."""
-        self.gains[key] = float(value)
-        value_var.set(f"{float(value):.3f}")
+        """Handle slider value change - sync X and Y values."""
+        float_value = float(value)
+        self.gains[key] = float_value
+        value_var.set(f"{float_value:.5f}")
+        
+        # Mirror to Y axis
+        y_key = key.replace('_x', '_y')
+        self.gains[y_key] = float_value
+        
         self._write_gains()
     
     def _write_gains(self):
@@ -173,32 +158,14 @@ class PIDTunerGUI:
         """Reset all gains to initial values from file."""
         for key, value in self.initial_gains.items():
             self.gains[key] = value
-            # Update slider widget
-            if key in self.sliders:
+            # Only update sliders for X-axis (Y mirrors automatically)
+            if '_x' in key and key in self.sliders:
                 self.sliders[key].set(value)
-            # Update value display
-            if key in self.value_vars:
-                self.value_vars[key].set(f"{value:.3f}")
+            if '_x' in key and key in self.value_vars:
+                self.value_vars[key].set(f"{value:.5f}")
         
         self._write_gains()
         print("Reset to initial gains")
-    
-    def _copy_x_to_y(self):
-        """Copy X-axis gains to Y-axis."""
-        y_keys = ['kp_y', 'ki_y', 'kd_y', 'pf_y']
-        x_keys = ['kp_x', 'ki_x', 'kd_x', 'pf_x']
-        
-        for x_key, y_key in zip(x_keys, y_keys):
-            self.gains[y_key] = self.gains[x_key]
-            # Update slider widget
-            if y_key in self.sliders:
-                self.sliders[y_key].set(self.gains[y_key])
-            # Update value display
-            if y_key in self.value_vars:
-                self.value_vars[y_key].set(f"{self.gains[y_key]:.3f}")
-        
-        self._write_gains()
-        print(f"Copied X gains to Y: Kp={self.gains['kp_y']:.3f} Ki={self.gains['ki_y']:.3f} Kd={self.gains['kd_y']:.3f} Pf={self.gains['pf_y']:.3f}")
     
     def _update_loop(self):
         """Periodic update (can be used for reading feedback, etc)."""
