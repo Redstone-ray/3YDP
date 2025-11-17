@@ -7,6 +7,10 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 import keyboard
+import subprocess
+import struct
+import os
+import sys
 from ForcenInterface import ForcenInterface
 from SPV4 import StewartPlatform
 from ServoController import ServoController
@@ -209,7 +213,7 @@ class BallBalancingController:
         print("Initializing Servo Controller")
         servo_defaults = {
             'port': servo_port,
-            'visualize': enable_spv4_viz,
+            'visualize': False,  # Always False - we use separate process for visualization
             'flip_servo': [True, True, True],
             'neutral_angles': [122, 126, 126],
             'min_servo_angle': 78,
@@ -233,6 +237,13 @@ class BallBalancingController:
         self.fig = None
         self.ball = None
         self.coord_text = None
+        
+        # Visualization processes
+        self.viz_processes = []
+        self.viz_data_file = 'ball_state.dat'
+        self.viz_data_format = '8d'  # 8 doubles: x, y, weight_g, pitch, roll, error_x, error_y, timestamp
+        self.platform_data_file = 'platform_state.dat'
+        self.platform_data_format = '16d'  # 16 doubles: x1, x2, x3 (9), angles (6), timestamp
         
         # PID tuning increments
         self.kp_step = 0.005
@@ -393,13 +404,31 @@ class BallBalancingController:
         print("\nNote: High-inertia ball - using velocity feedforward & filtered derivative")
         print("Press Ctrl+C or ESC to stop\n")
         
-        # Set up Forcen visualization
+        # Launch visualization processes if enabled
+        python_exe = sys.executable
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        
         if self.enable_forcen_viz:
-            self.fig, self.ball, self.coord_text = self.sensor.visualize_ball_position()
-            if self.fig is None:
-                print("Warning: Forcen visualization setup failed!")
-        else:
-            self.fig, self.ball, self.coord_text = None, None, None
+            viz_script = os.path.join(script_dir, 'viz_forcen.py')
+            if os.path.exists(viz_script):
+                print("Launching Forcen visualization process...")
+                proc = subprocess.Popen([python_exe, viz_script, self.viz_data_file],
+                                       creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == 'win32' else 0)
+                self.viz_processes.append(proc)
+            else:
+                print(f"Warning: Visualization script not found: {viz_script}")
+        
+        if self.enable_spv4_viz:
+            viz_script = os.path.join(script_dir, 'viz_spv4.py')
+            if os.path.exists(viz_script):
+                print("Launching SPV4 visualization process...")
+                proc = subprocess.Popen([python_exe, viz_script, self.platform_data_file],
+                                       creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == 'win32' else 0)
+                self.viz_processes.append(proc)
+            else:
+                print(f"Warning: Visualization script not found: {viz_script}")
+        
+        time.sleep(0.5)  # Give visualization processes time to start
         
         self.running = True
         frame_count = 0
@@ -478,39 +507,38 @@ class BallBalancingController:
                                 self.controller.send_angles(angles)
                                 self.last_angles = angles
                             
-                            # 8. Update Forcen visualization
-                            if self.fig is not None:
-                                self.ball.center = (x, y)
+                            # 8. Write visualization data to files (every 10th frame for ~10Hz viz)
+                            if self.viz_processes and frame_count % 10 == 0:
                                 weight_g = self.sensor.get_weight(data)
                                 
-                                # Update coordinate text
-                                self.coord_text.set_text(
-                                    f'X: {x:7.1f} mm\n'
-                                    f'Y: {y:7.1f} mm\n'
-                                    f'Weight: {weight_g:5.1f} g\n'
-                                    f'Pitch: {pitch_correction:+5.1f}°\n'
-                                    f'Roll: {roll_correction:+5.1f}°'
-                                )
+                                # Write ball state for Forcen viz
+                                if self.enable_forcen_viz:
+                                    viz_data = struct.pack(self.viz_data_format,
+                                                          x, y, weight_g,
+                                                          pitch_correction, roll_correction,
+                                                          error_x, error_y,
+                                                          loop_start)
+                                    try:
+                                        with open(self.viz_data_file, 'wb') as f:
+                                            f.write(viz_data)
+                                    except:
+                                        pass  # Don't let viz writing block control loop
                                 
-                                # Color based on distance from setpoint
-                                distance = np.sqrt(error_x**2 + error_y**2)
-                                if weight_g < 300:
-                                    self.ball.set_color('grey')
-                                    self.ball.set_alpha(0.3)
-                                elif distance < 10:  # Within 10mm of setpoint
-                                    self.ball.set_color('green')
-                                    self.ball.set_alpha(0.8)
-                                elif distance < 30:
-                                    self.ball.set_color('yellow')
-                                    self.ball.set_alpha(0.8)
-                                else:
-                                    self.ball.set_color('orange')
-                                    self.ball.set_alpha(0.8)
-                                
-                                # Update plot (throttled)
-                                if frame_count % 5 == 0:
-                                    self.fig.canvas.draw_idle()
-                                    self.fig.canvas.flush_events()
+                                # Write platform state for SPV4 viz
+                                if self.enable_spv4_viz:
+                                    platform_data = struct.pack(self.platform_data_format,
+                                                               ik['x1'][0], ik['x1'][1], ik['x1'][2],
+                                                               ik['x2'][0], ik['x2'][1], ik['x2'][2],
+                                                               ik['x3'][0], ik['x3'][1], ik['x3'][2],
+                                                               ik['theta_11'], ik['theta_12'],
+                                                               ik['theta_21'], ik['theta_22'],
+                                                               ik['theta_31'], ik['theta_32'],
+                                                               loop_start)
+                                    try:
+                                        with open(self.platform_data_file, 'wb') as f:
+                                            f.write(platform_data)
+                                    except:
+                                        pass  # Don't let viz writing block control loop
                             
                             # Print status
                             if verbose:
@@ -570,6 +598,22 @@ class BallBalancingController:
         """Stop the controller and clean up resources."""
         self.running = False
         
+        # Terminate visualization processes
+        for proc in self.viz_processes:
+            if proc.poll() is None:  # Process still running
+                proc.terminate()
+        if self.viz_processes:
+            print("Visualization processes terminated")
+        
+        # Clean up data files
+        try:
+            if os.path.exists(self.viz_data_file):
+                os.remove(self.viz_data_file)
+            if os.path.exists(self.platform_data_file):
+                os.remove(self.platform_data_file)
+        except:
+            pass
+        
         # Return to neutral position
         print("\nReturning to neutral position...")
         try:
@@ -615,8 +659,8 @@ if __name__ == "__main__":
         pid_kd=0.03,      # Increased Kd for damping (counters inertia)
         pid_pf=0.0,       # Feedforward gain for velocity compensation
         max_tilt=14.0,
-        enable_spv4_viz=True,   # Disable 3D platform visualization
-        enable_forcen_viz=True   # Keep ball position visualization
+        enable_spv4_viz=True,    # SPV4 viz (separate process)
+        enable_forcen_viz=True   # Forcen viz (separate process)
     ) as controller:
         
         # Move platform to home position before calibration
