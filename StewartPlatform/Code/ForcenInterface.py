@@ -836,17 +836,17 @@ if __name__ == "__main__":
         arm_cog_x=0.0,
         arm_cog_y=0.0,
         arm_cog_z=0.005,  # 5 mm
-        arm_weight=1.2,    # 1.2 kg
+        arm_weight=0.489,    # 0.489 kg
         arm_length_z=0.009,  # 9 mm
         arm_weight_confidence=0.7,
         rotation_angle=135,  # Rotate coordinate frame (degrees, counter-clockwise)
-        scale_x=1.1,         # X-axis radial scale factor
-        scale_y=1.1,         # Y-axis radial scale factor
+        scale_x=6,         # X-axis radial scale factor
+        scale_y=6,         # Y-axis radial scale factor
         flip_x=False,        # Flip X-axis after rotation
         flip_y=True,         # Flip Y-axis after rotation
         platform_radius=150.0,
-        fz_min=4000.0,
-        fz_max=8000.0,
+        fz_min=3200.0,
+        fz_max=4800.0,
         filter_alpha=0.8        # Low-pass filter smoothing factor (0-1, 1 is no smoothing)
     )
     
@@ -857,7 +857,7 @@ if __name__ == "__main__":
             print("Initialization failed!")
             exit(1)
         
-        # # Step 2: Run calibration (auto-save to EEPROM)
+        # Step 2: Run calibration (auto-save to EEPROM)
         if not sensor.calibrate(taring_time=5, save_to_eeprom=False):
             print("Calibration failed!")
             exit(1)
@@ -903,7 +903,7 @@ if __name__ == "__main__":
                         
                         # Check if ball is outside platform or weight dropped
                         distance_from_center = (x**2 + y**2)**0.5
-                        if weight_g < 300:  # Weight dropped significantly (below 300g)
+                        if weight_g < 10:  # Weight dropped significantly (below 10g)
                             ball.set_color('grey')
                             ball.set_alpha(0.3)  # Translucent
                         elif distance_from_center > 150:

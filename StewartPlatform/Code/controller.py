@@ -200,17 +200,17 @@ class BallBalancingController:
             'arm_cog_x': 0.0,
             'arm_cog_y': 0.0,
             'arm_cog_z': 0.005,
-            'arm_weight': 1.2,
+            'arm_weight': 0.489,
             'arm_length_z': 0.009,
             'arm_weight_confidence': 0.7,
             'rotation_angle': 135,
-            'scale_x': 1.1,
-            'scale_y': 1.1,
+            'scale_x': 6,
+            'scale_y': 6,
             'flip_x': False,
             'flip_y': True,
             'platform_radius': 150.0,
-            'fz_min': 4000.0,
-            'fz_max': 8000.0,
+            'fz_min': 3200.0,
+            'fz_max': 4800.0,
             'filter_alpha': 0.9
         }
         if forcen_config:
@@ -507,7 +507,7 @@ class BallBalancingController:
                 #use CV data: uncomment
                 #x, y, weight_g = self.read_cv_ball_position()
                     
-                    if x is not None and y is not None and weight_g > 200:
+                    if x is not None and y is not None and weight_g > 30:
                         # 3. Calculate errors (setpoint - measurement)
                         error_x = self.setpoint_x - x
                         error_y = self.setpoint_y - y
