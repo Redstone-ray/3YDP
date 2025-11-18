@@ -18,6 +18,7 @@ from ServoController import ServoController
 VIZ_FORCEN_SCRIPT = 'viz_forcen.py'
 VIZ_SPV4_SCRIPT = 'viz_spv4.py'
 VIZ_TUNER_SCRIPT = 'viz_tuner.py'
+VIZ_CV_SCRIPT ='viz_platform_cal.py' 
 
 
 class PIDController:
@@ -423,6 +424,40 @@ class BallBalancingController:
         print("✓ Sensor ready\n")
         return True
     
+    #---------------------------------
+    #function to read from cv.dat
+    # def read_cv_dat(self, filename= "cv_ball_state.dat"):
+    #     FMT = '6d'
+    #     SIZE = struct.calcsize(FMT)
+
+    #     try:
+    #         if not os.path.exists(filename):
+    #             return None
+
+    #         with open(filename, "rb") as f:
+    #             data = f.read(SIZE)
+
+    #         if len(data) != SIZE:
+    #             return None
+
+    #         dx, dy, px, py, r, ts = struct.unpack(FMT, data)
+
+    #         # If r==0 or px/py are zero, detection failed
+    #         if r < 5:
+    #             return None
+
+    #         # Convert dx/dy (meters) → mm
+    #         x_mm = dx * 1000.0
+    #         y_mm = dy * 1000.0
+
+    #         # Fake weight so the controller thinks a ball is present
+    #         weight_fake = 500.0  
+
+    #         return x_mm, y_mm, weight_fake
+
+    #     except:
+    #         return None
+    
     def run(self, update_rate=0.05, verbose=True):
         """
         Main control loop.
@@ -468,6 +503,9 @@ class BallBalancingController:
                     # 2. Get ball position
                     x, y = self.sensor.estimate_ball_position(data)
                     weight_g = self.sensor.get_weight(data)
+
+                #use CV data: uncomment
+                #x, y, weight_g = self.read_cv_ball_position()
                     
                     if x is not None and y is not None and weight_g > 200:
                         # 3. Calculate errors (setpoint - measurement)
