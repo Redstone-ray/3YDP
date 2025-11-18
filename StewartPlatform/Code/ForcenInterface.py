@@ -688,15 +688,15 @@ class ForcenInterface:
         distance_from_center = (x_raw**2 + y_raw**2)**0.5
         if distance_from_center > self.platform_radius:
             # Position outside platform - likely acceleration, use last valid position
-            if __name__ == "__main__":
-                print(f"[FILTER] Position outside bounds: {distance_from_center:.1f}mm > {self.platform_radius}mm")
+            # if __name__ == "__main__":
+            print(f"[FILTER] Position outside bounds: {distance_from_center:.1f}mm > {self.platform_radius}mm")
             return self.last_valid_position
         
         # Filter 2: Check if Fz is within acceptable band
         if current_fz < self.fz_min or current_fz > self.fz_max:
             # Force outside acceptable band - likely acceleration, use last valid position
-            if __name__ == "__main__":
-                print(f"[FILTER] Fz outside band: {current_fz:.1f} mN")
+            # if __name__ == "__main__":
+            print(f"[FILTER] Fz outside band: {current_fz:.1f} mN")
             return self.last_valid_position
         
         # Apply low-pass filter for smoothing (before updating last_valid_position)
@@ -803,7 +803,7 @@ class ForcenInterface:
         ax.add_patch(platform)
         
         # Initialize the ball (40mm diameter = 20mm radius)
-        ball = patches.Circle((0, 0), 20, color='orange', alpha=0.8)
+        ball = patches.Circle((0, 0), 25.4, color='orange', alpha=0.8)
         ax.add_patch(ball)
         
         # Add text for coordinates and weight

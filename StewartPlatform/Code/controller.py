@@ -209,8 +209,8 @@ class BallBalancingController:
             'flip_x': False,
             'flip_y': True,
             'platform_radius': 150.0,
-            'fz_min': 3200.0,
-            'fz_max': 4800.0,
+            'fz_min': 3000.0,
+            'fz_max': 5500.0,
             'filter_alpha': 0.9
         }
         if forcen_config:
@@ -570,7 +570,7 @@ class BallBalancingController:
                         # 5. Calculate normal vector from pitch and roll
                         pitch_rad = pitch_correction * np.pi / 180
                         roll_rad = roll_correction * np.pi / 180
-                        normal = [-np.sin(roll_rad), 
+                        normal = [np.sin(roll_rad), 
                                  np.sin(pitch_rad), 
                                  np.cos(pitch_rad) * np.cos(roll_rad)]
                         
@@ -653,8 +653,7 @@ class BallBalancingController:
             self.stop()
             
     def go_home(self):
-        neutral_ik = self.platform.inverse_kinematics([0.01, 0.01, 1], [0, 0, self.platform_height])
-        neutral_angles = [neutral_ik['theta_11'], neutral_ik['theta_21'], neutral_ik['theta_31']]
+        neutral_angles = [10,10,10]
         self.controller.send_angles(neutral_angles)
     
     def stop(self):
