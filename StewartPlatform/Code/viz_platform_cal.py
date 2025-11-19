@@ -122,14 +122,21 @@ class SimplePlatformCalibrator:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         blurred = cv2.GaussianBlur(gray, (13, 13), 2)
         edges = cv2.Canny(blurred, 50, 150)
+        mask = np.zeros_like(gray)
+        cx, cy = self.center_point
+        cv2.circle(mask, (cx, cy), int(self.pixel_radius), 255, -1)
+        blurred_masked = cv2.bitwise_and(blurred, blurred, mask=mask)
         circles = cv2.HoughCircles(
-            blurred,
+            blurred_masked,
             cv2.HOUGH_GRADIENT,
-            dp=1.2,          # slightly lower → more robust
+            dp=1.2,          #basically how rough you want circle detection to be, 1.0 = smoothest
             minDist=40,
 
-            param1=80,       # SOFTER CANNY → more consistent edges
-            param2=16,       # MUCH LOWER → stable detection (big change)
+            param1=80,       # Higher param1 → stronger, sharper edges detected only
+
+                                # Lower param1 → more edges
+            param2=16,       #High param2 → only strong edges form circles
+                             #Low param2 → ANY circle-like edge is accepted
 
             minRadius=10,
             maxRadius=32
@@ -141,9 +148,9 @@ class SimplePlatformCalibrator:
         circles = np.round(circles[0, :]).astype("int")
         circles = sorted(circles, key=lambda c: c[2], reverse=True)  # largest
         x, y, r = circles[0]
-
-        if r < 5 or r > 80:
+        if r < 5 or r > 40:
             return None
+        
 
 
         # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -210,6 +217,45 @@ class SimplePlatformCalibrator:
         # ALWAYS draw detected ball (NEW BEHAVIOR)
         # ===================================================
         if self.phase == "preview":
+
+            # ===================================================
+            # DRAW COORDINATE AXES WITH 0.02 m TICK SPACING
+            # ===================================================
+            if self.center_point and self.pixel_radius and self.pixel_to_meter_ratio:
+                cx, cy = self.center_point
+                R = int(self.pixel_radius)
+
+                # ---- Main axes ----
+                cv2.line(overlay, (cx - R, cy), (cx + R, cy), (255, 255, 255), 1)  # X-axis
+                cv2.line(overlay, (cx, cy - R), (cx, cy + R), (255, 255, 255), 1)  # Y-axis
+
+                # ---- Tick spacing (locked to 0.02 m) ----
+                tick_m = 0.02                    # 2 cm spacing
+                tick_px = tick_m / self.pixel_to_meter_ratio
+
+                # Number of ticks within radius
+                n_ticks = int(self.PLATFORM_RADIUS_M / tick_m)
+
+                # ---- X-axis ticks (horizontal) ----
+                for i in range(-n_ticks, n_ticks + 1):
+                    x_px = int(cx + i * tick_px)
+                    cv2.line(overlay, (x_px, cy - 5), (x_px, cy + 5), (255, 255, 255), 1)
+
+                    if i != 0:
+                        cv2.putText(overlay, f"{i*tick_m:.2f}",
+                                    (x_px - 12, cy + 20),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255,255,255), 1)
+
+                # ---- Y-axis ticks (vertical) ----
+                for i in range(-n_ticks, n_ticks + 1):
+                    y_px = int(cy - i * tick_px)      # minus because dy_m is inverted
+                    cv2.line(overlay, (cx - 5, y_px), (cx + 5, y_px), (255, 255, 255), 1)
+
+                    if i != 0:
+                        cv2.putText(overlay, f"{i*tick_m:.2f}",
+                                    (cx + 10, y_px + 5),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255,255,255), 1)
+                        
             pos = self.detect_ball_position(frame)
             if pos is not None:
                 dx_m, dy_m, (x, y), radius = pos
@@ -254,6 +300,8 @@ class SimplePlatformCalibrator:
                                 (fx_px + 20, fy_px),
                                 cv2.FONT_HERSHEY_SIMPLEX,
                                 0.5, (0, 255, 0), 1)
+                    
+            
 
         return overlay
     # ============================
