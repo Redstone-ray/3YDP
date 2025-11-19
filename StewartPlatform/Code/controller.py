@@ -718,10 +718,10 @@ if __name__ == "__main__":
         platform_height=10.6,
         setpoint_x=0.0,
         setpoint_y=0.0,
-        pid_kp=0.055,      # Increased Kp for heavier ball
-        pid_ki=0.003,     # Small integral to handle steady-state error
+        pid_kp=0.06,      # Increased Kp for heavier ball
+        pid_ki=0.020,     # Small integral to handle steady-state error
         pid_kd=0.03,      # Increased Kd for damping (counters inertia)
-        pid_pf=0.0014,       # Feedforward gain for velocity compensation
+        pid_pf=0.002,       # Feedforward gain for velocity compensation
         max_tilt=14.0,
         enable_spv4_viz=True,    # SPV4 viz (separate process)
         enable_forcen_viz=True,  # Forcen viz (separate process)
